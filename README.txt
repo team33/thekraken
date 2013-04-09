@@ -118,7 +118,7 @@ Contents:
 
 
        $ thekraken -u
-       thekraken: The Kraken 0.7 (compiled Sat May 19 10:47:58 MDT 2012 by fah@tentacle)
+       thekraken: The Kraken 0.7-pre11 (compiled Sun May 20 19:36:47 MDT 2012 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing uninstallation from .
@@ -132,7 +132,7 @@ Contents:
     4. Run 'thekraken -i'; it should give output similar to the following:
 
        $ thekraken -i
-       thekraken: The Kraken 0.7 (compiled Sat May 19 10:47:58 MDT 2012 by fah@tentacle)
+       thekraken: The Kraken 0.7-pre11 (compiled Sun May 20 19:36:47 MDT 2012 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing installation to .
@@ -181,7 +181,7 @@ Contents:
        Doing so should result in something along the following:
 
        $ thekraken -i
-       thekraken: The Kraken 0.7 (compiled Sat May 19 10:47:58 MDT 2012 by fah@tentacle)
+       thekraken: The Kraken 0.7-pre11 (compiled Sun May 20 19:36:47 MDT 2012 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing installation to .

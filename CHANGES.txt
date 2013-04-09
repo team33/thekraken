@@ -1,3 +1,7 @@
+2012-05-20 -- Prerelease (thekraken-0.7-pre11)
+-- resolves build issues in certain configurations
+
+
 2012-05-20 -- Prerelease (thekraken-0.7-pre10)
 -- use dynamic log fd detection w/DLB load
 
