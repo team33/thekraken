@@ -17,6 +17,8 @@
  *
  */
 
+#include <time.h>
+
 #include <signal.h>
 #include <stdio.h>
 #include <errno.h>
@@ -32,7 +34,6 @@
 #include <linux/ptrace.h>
 #include <sys/syscall.h>
 #include <sys/user.h>
-#include <math.h>
 
 #include <dirent.h>
 #include <sys/fsuid.h>
@@ -41,6 +42,7 @@
 
 #include "version.h"
 #include "build.h"
+#include "synthload.h"
 
 #define WELCOME_LINES "thekraken: The Kraken " VERSION " %s\nthekraken: Processor affinity wrapper for Folding@Home\nthekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\n"
 #define CA5_SHORT "FahCore_a5"
@@ -58,16 +60,14 @@
 static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, NULL };
 
 extern char **environ;
-static int cpid;
+static pid_t cpid;
 static FILE *logfp;
 static int logfd;
 
-#define LOG_BUF_SIZE 1024
+#define LOG_BUF_SIZE 128
 #define LOG_FD 5
-static int tpid, tpid_log_insyscall, tpid_err_insyscall;
-static int *synload_pids = NULL;
-static int synload_duration = 8; // load duration in seconds
-static int synload_waitduration = 200;//wait between loads in ms
+static pid_t tpid, mpid;
+static int tpid_log_insyscall, tpid_err_insyscall;
 
 static int debug_level;
 #define debug(_lev) if (debug_level >= _lev)
@@ -88,13 +88,6 @@ static void sighandler(int n)
 	snprintf(buf, sizeof(buf), "thekraken (sighandler): %d got signal 0x%08x\n", getpid(), n);
 	write(logfd, buf, strlen(buf));
 	kill(cpid, n);
-}
-
-static void sigalrmhandler_synload(int n)
-{
-	/* alarm on a synthetic load process.  sleep for a bit, then begin the load again */
-	usleep(synload_waitduration * 1000);
-	alarm(synload_duration);
 }
 
 static int do_install(char *s)
@@ -198,7 +191,7 @@ static int list_install(int options, int *counter, int *total)
 }
 
 static int uninstall(char *s, int options)
-{	
+{
 	char fn[32];
 	int rv;
 	struct stat st;
@@ -258,18 +251,32 @@ static int list_uninstall(int options, int *counter, int *total)
 }
 
 
-#define CONF_STARTCPU 0     // bind the FahCore processes starting with this cpu
-#define CONF_MAX 1
+#define CONF_STARTCPU 0 // bind the FahCore processes starting with this cpu
+#define CONF_DLBLOAD 1
+#define CONF_DLBLOAD_ONPERIOD 2
+#define CONF_DLBLOAD_OFFPERIOD 3
+#define CONF_DLBLOAD_DEADLINE 4
+#define CONF_MAX 5
+
+#define DEFAULT_STARTCPU 0
+#define DEFAULT_DLBLOAD 1
+#define DEFAULT_DLBLOAD_ONPERIOD 8000
+#define DEFAULT_DLBLOAD_OFFPERIOD 200
+#define DEFAULT_DLBLOAD_DEADLINE 300000 // 5 minutes
 
 static char **conf_line;
 static int conf_index;
 static int conf_total;
 static int conf_step = 4;
 
-static char *conf_key[] = { "startcpu", NULL };
+static char *conf_key[] = { "startcpu", "dlbload", "dlbload_onperiod", "dlbload_offperiod", "dlbload_deadline", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
-static int conf_startcpu;
+static unsigned int conf_startcpu = DEFAULT_STARTCPU;
+static unsigned int conf_dlbload = DEFAULT_DLBLOAD;
+static unsigned int conf_dlbload_onperiod = DEFAULT_DLBLOAD_ONPERIOD;
+static unsigned int conf_dlbload_offperiod = DEFAULT_DLBLOAD_OFFPERIOD;
+static unsigned int conf_dlbload_deadline = DEFAULT_DLBLOAD_DEADLINE;
 
 static void conf_line_add(char *s)
 {
@@ -289,12 +296,64 @@ static int conf_validate_one(int n)
 		char *end;
 		
 		conf_startcpu = strtol(conf_val[CONF_STARTCPU], &end, 10);
-		if (*end != '\0' || conf_startcpu < 0 || conf_startcpu > 128) {
+		if (*end != '\0' || conf_startcpu > 128) {
 			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_STARTCPU], conf_val[CONF_STARTCPU]);
 			ret = 1;
-			conf_startcpu = 0;
+			conf_startcpu = DEFAULT_STARTCPU;
 		} else {
 			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_STARTCPU], conf_startcpu);
+		}
+		return ret;
+	}
+	if (n == CONF_DLBLOAD && conf_val[CONF_DLBLOAD]) {
+		char *end;
+		
+		conf_dlbload = strtol(conf_val[CONF_DLBLOAD], &end, 10);
+		if (*end != '\0' || conf_dlbload > 1) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_DLBLOAD], conf_val[CONF_DLBLOAD]);
+			ret = 1;
+			conf_dlbload = DEFAULT_DLBLOAD;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_DLBLOAD], conf_dlbload);
+		}
+		return ret;
+	}
+	if (n == CONF_DLBLOAD_ONPERIOD && conf_val[CONF_DLBLOAD_ONPERIOD]) {
+		char *end;
+		
+		conf_dlbload_onperiod = strtol(conf_val[CONF_DLBLOAD_ONPERIOD], &end, 10);
+		if (*end != '\0' || conf_dlbload_onperiod == 0) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_DLBLOAD_ONPERIOD], conf_val[CONF_DLBLOAD_ONPERIOD]);
+			ret = 1;
+			conf_dlbload_onperiod = DEFAULT_DLBLOAD_ONPERIOD;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_DLBLOAD_ONPERIOD], conf_dlbload_onperiod);
+		}
+		return ret;
+	}
+	if (n == CONF_DLBLOAD_OFFPERIOD && conf_val[CONF_DLBLOAD_OFFPERIOD]) {
+		char *end;
+		
+		conf_dlbload_offperiod = strtol(conf_val[CONF_DLBLOAD_OFFPERIOD], &end, 10);
+		if (*end != '\0' || conf_dlbload_offperiod == 0) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_DLBLOAD_OFFPERIOD], conf_val[CONF_DLBLOAD_OFFPERIOD]);
+			ret = 1;
+			conf_dlbload_offperiod = DEFAULT_DLBLOAD_OFFPERIOD;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_DLBLOAD_OFFPERIOD], conf_dlbload_offperiod);
+		}
+		return ret;
+	}
+	if (n == CONF_DLBLOAD_DEADLINE && conf_val[CONF_DLBLOAD_DEADLINE]) {
+		char *end;
+		
+		conf_dlbload_deadline = strtol(conf_val[CONF_DLBLOAD_DEADLINE], &end, 10);
+		if (*end != '\0' || conf_dlbload_deadline == 0) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_DLBLOAD_DEADLINE], conf_val[CONF_DLBLOAD_DEADLINE]);
+			ret = 1;
+			conf_dlbload_deadline = DEFAULT_DLBLOAD_DEADLINE;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_DLBLOAD_DEADLINE], conf_dlbload_deadline);
 		}
 		return ret;
 	}
@@ -459,46 +518,36 @@ out:
 	return;
 }
 
-char* getstr(pid_t child, long addr, int len) {
+static void getstr(pid_t child, long addr, int len, char *dst, int *dstofs, int dstsize)
+{
 	int i = 0;
-	char *str = malloc(sizeof(char) * (len + 1));
-	char *curstr = str;
-	union u {
-		long l;
-		char s[sizeof(long)];
-	} chunk;
+	char *curstr = dst + *dstofs;
+	long chunk;
+	
+	if (len > dstsize - *dstofs - 1) {
+		len = dstsize - *dstofs - 1;
+	}
 
 	while(i < len) {
 		int tocpy = len - i > sizeof(long) ? sizeof(long) : len - i;
-		chunk.l = ptrace(PTRACE_PEEKDATA, child, addr + i);
-		memcpy(curstr, chunk.s, tocpy);
-		curstr += tocpy; 
+		chunk = ptrace(PTRACE_PEEKDATA, child, addr + i);
+		memcpy(curstr, &chunk, tocpy);
 		i += tocpy;
+		curstr += tocpy;
 	}
 	*curstr = '\0';
-	return str;
+	*dstofs = curstr - dst;
 }
 
-void synload()
+static char* gettimestr(char *dst)
 {
-	while (1)
-		sqrt(rand());
-}
+	if(dst == NULL)
+		return NULL;
 
-static void kill_synload()
-{
-	if(synload_pids == NULL)
-		return;
-
-	int *pid = synload_pids;
-	while(*pid > 0) {
-		fprintf(logfp, "thekraken: synload: sending SIGTERM to %d\n", *pid);
-		kill(*pid, SIGTERM);
-		pid++;
-	}
-
-	free(synload_pids);
-	synload_pids = NULL;
+	time_t tm_t = time(NULL);
+	struct tm *ltime = localtime(&tm_t);
+	sprintf(dst, "%02d:%02d:%02d", ltime->tm_hour, ltime->tm_min, ltime->tm_sec);
+	return dst;
 }
 
 int main(int ac, char **av)
@@ -514,10 +563,13 @@ int main(int ac, char **av)
 	int nclones = 0;
 	int last_used_cpu = 0;
 	cpu_set_t cpuset;
+	char timestr[10];
 
-	/* setup the buffer to store data written to logfile_xx.txt */
+	/* setup the buffer to store data written to logfile_xx.txt and stderr */
 	char logbuf[LOG_BUF_SIZE];
-	char *logbufptr = logbuf;
+	int logbufpos = 0;
+	char errbuf[LOG_BUF_SIZE];
+	int errbufpos = 0;
 
 	s = strrchr(av[0], '/');
 	if (!s) {
@@ -700,7 +752,7 @@ int main(int ac, char **av)
 	config[sizeof(config) - 1] = '\0';
 	snprintf(u, sizeof(config) - len - 1, "%s", CONF_FN);
 	fprintf(logfp, "thekraken: config file: %s\n", config);
-	
+
 	conf_file_parse(config);
 
 	signal(SIGHUP, sighandler);
@@ -748,11 +800,16 @@ int main(int ac, char **av)
 
 		if (WIFEXITED(status)) {
 			fprintf(logfp, "thekraken: %d: exited with %d\n", rv, WEXITSTATUS(status));
+			if (rv == mpid) {
+				/* synthload manager exited */
+				fprintf(logfp, "thekraken: %d: [%s] synthetic load manager exit\n", rv, gettimestr(timestr));
+				tpid = -1;
+				continue;
+			}
 			if (rv != cpid) {
 				fprintf(logfp, "thekraken: %d: ignoring clone exit\n", rv);
 				continue;
 			}
-			kill_synload();
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
@@ -781,8 +838,11 @@ int main(int ac, char **av)
 					/* initial attach */
 					fprintf(logfp, "thekraken: %d: initial attach\n", rv);
 					prv = ptrace(PTRACE_SETOPTIONS, rv, 0, PTRACE_O_TRACECLONE);
+					fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
+					prv = ptrace(PTRACE_CONT, rv, 0, 0);
+					continue;
 				}
-				else if (e & PTRACE_EVENT_CLONE) {
+				if (e & PTRACE_EVENT_CLONE) {
 					int c;
 
 					prv = ptrace(PTRACE_GETEVENTMSG, rv, 0, &cloned);
@@ -796,65 +856,57 @@ int main(int ac, char **av)
 						last_used_cpu++;
 						sched_setaffinity(c, sizeof(cpuset), &cpuset);
 					}
-					if (nclones == 1) {
+					if (nclones == 1 && conf_dlbload == 1) {
 						fprintf(logfp, "thekraken: %d: talkative FahCore process; listening to syscalls\n", c);
 						tpid = c;
 					}
-				} else if (rv == tpid) {
+					
+					/*
+					 * The following's quite dirty; we're relying on the fact that
+					 * tpid clones add'l threads; if that wasn't the case, calling
+					 * ptrace(PTRACE_SYSCALL, tpid, ...) would be challenging...
+					 */
+					if (rv == tpid) {
+						prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
+					} else {
+						fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
+						prv = ptrace(PTRACE_CONT, rv, 0, 0);
+					}
+					continue;
+				}
+
+				if (rv == tpid) {
 					/* this is the talkative fah process. Check for data written to stderr or the logfile (fd 5) */
+					long call, fd, msgaddr, msglen;
 					struct user_regs_struct regs;
+
 					ptrace(PTRACE_GETREGS, rv, NULL, &regs);
-					long call = regs.orig_rax;
-					long fd = regs.rdi;
-					long msgaddr = regs.rsi;
-					long msglen = regs.rdx;
+					call = regs.orig_rax;
+					fd = regs.rdi;
+					msgaddr = regs.rsi;
+					msglen = regs.rdx;
 
 					if (call == SYS_write && fd == LOG_FD) {
 						if (!tpid_log_insyscall) {
 							tpid_log_insyscall = 1;
-							char *str = getstr(rv, msgaddr, msglen);
-							memcpy(logbufptr, str, msglen);
-							free(str);
-							logbufptr += msglen;
-							*logbufptr = '\0';
+							getstr(rv, msgaddr, msglen, logbuf, &logbufpos, sizeof(logbuf));
 							if(strchr(logbuf, '\n') != NULL) {
 								if(strstr(logbuf, "Completed ") != NULL && strstr(logbuf, "out of") != NULL) {
-									fprintf(logfp, "thekraken: %d: first step identified; initiating synthetic load.\n", rv);
+									int dlbload_workers = (nclones - 2) / 2;
 
-									/* generate new synthetic load processes */
-									int synload_threads = (nclones - 2) / 2;
-									synload_pids = malloc(sizeof(int) * (synload_threads + 1));
-									int *curpid = synload_pids;
-									last_used_cpu = conf_startcpu + 1;
-									for(; synload_threads > 0; synload_threads--) {
-										int pid = fork();
-										if(pid == -1) {
-											fprintf(logfp, "thekraken: synload fork: %s\n", strerror(errno));
-											return -1;
-										} else if(pid == 0) {
-											/* reset signals on the child and setup our own alarm */
-											signal(SIGHUP, SIG_DFL);
-											signal(SIGTERM, SIG_DFL);
-											signal(SIGINT, SIG_DFL);
-											signal(SIGALRM, sigalrmhandler_synload);
-
-											alarm(synload_duration);
-											synload();
-										} else {
-											*curpid = pid;
-											curpid++;
-
-											fprintf(logfp, "thekraken: synload: %d: synthetic load (%d)thread created.  load %ds; wait %dms\n", getpid(), pid, synload_duration, synload_waitduration);
-											/* set affinity on the new load process */
-											CPU_ZERO(&cpuset);
-											CPU_SET(last_used_cpu, &cpuset);
-											sched_setaffinity(pid, sizeof(cpuset), &cpuset);
-											last_used_cpu += 2;
-										}
+									fprintf(logfp, "thekraken: %d: [%s] first step identified\n", rv, gettimestr(timestr));
+									fprintf(logfp, "thekraken: %d: creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
+									mpid = synthload_start(conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline, dlbload_workers, conf_startcpu);
+									if(mpid == -1) {
+										fprintf(logfp, "thekraken: synthload_start error: %s\n", strerror(errno));
+										return -1;
 									}
-									*curpid = -1;
 								}
-								logbufptr = logbuf;
+								logbufpos = 0;
+							}
+							if (logbufpos == sizeof(logbuf) - 1) {
+								fprintf(logfp, "thekraken: %d: log buffer overflow! Clearing the buffer.\n", rv);
+								logbufpos = 0;
 							}
 						} else {
 							tpid_log_insyscall = 0;
@@ -862,29 +914,33 @@ int main(int ac, char **av)
 					} else if (call == SYS_write && fd == STDERR_FILENO) {
 						if (!tpid_err_insyscall) {
 							tpid_err_insyscall = 1;
-							char *str = getstr(rv, msgaddr, msglen);
-							if(strstr(str, "Turning on dynamic load balancing") != NULL) {
-								fprintf(logfp, "thekraken: synload: DLB has engaged; killing synthetic load\n");
-								kill_synload();
-								tpid = -1; // don't monitor the talkative thread anymore
+							getstr(rv, msgaddr, msglen, errbuf, &errbufpos, sizeof(errbuf));
+							if(strchr(errbuf, '\n') != NULL) {
+								if(strstr(errbuf, "Turning on dynamic load balancing") != NULL) {
+									fprintf(logfp, "thekraken: %d: [%s] DLB has engaged; killing synthetic load manager (%d)\n", rv, gettimestr(timestr), mpid);
+									kill(mpid, SIGTERM);
+									tpid = -1; // don't monitor the talkative thread anymore
+								}
+								errbufpos = 0;
 							}
-							free(str);
+							if (errbufpos == sizeof(errbuf) - 1) {
+								fprintf(logfp, "thekraken: %d: stderr buffer overflow! Clearing the buffer.\n", rv);
+								errbufpos = 0;
+							}
 						} else {
 							tpid_err_insyscall = 0;
 						}
 					}
-				}
-
-				if (rv == tpid) {
 					/* talkative FahCore process; notify us of the next syscall entry/exit */
 					prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
+					continue;
 				}
-				else {
-					fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
-					prv = ptrace(PTRACE_CONT, rv, 0, 0);
-				}
+
+				fprintf(logfp, "thekraken: %d: Continuing (unhandled trap).\n", rv);
+				prv = ptrace(PTRACE_CONT, rv, 0, 0);
 				continue;
 			}
+
 			if (WSTOPSIG(status) == SIGSTOP) {
 				fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
 				prv = ptrace(PTRACE_CONT, rv, 0, 0);

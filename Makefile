@@ -3,12 +3,12 @@ PREFIX=/usr
 
 PROJECT=thekraken
 PROJ_CFLAGS=-Wall -Wshadow -D_GNU_SOURCE -O2 $(CFLAGS)
-PROJ_LDFLAGS=-lm $(LDFLAGS)
+PROJ_LDFLAGS=-lm -lrt $(LDFLAGS)
 
 OBJROOT=obj
 OBJDIR=$(OBJROOT)
 
-SOURCES=thekraken.c
+SOURCES=thekraken.c synthload.c
 
 OBJECTS=$(SOURCES:%.c=$(OBJDIR)/%.o)
 DEPS=$(SOURCES:%.c=$(OBJDIR)/.%.d)
