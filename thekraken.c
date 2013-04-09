@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 by Kris Rusocki <kszysiu@gmail.com>
+ * Copyright (C) 2011,2012 by Kris Rusocki <kszysiu@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -34,8 +34,6 @@
 #include <sys/fsuid.h>
 
 #include <ctype.h>
-
-#include <time.h>
 
 #include "version.h"
 #include "build.h"
@@ -80,59 +78,6 @@ static void sighandler(int n)
 	write(logfd, buf, strlen(buf));
 	kill(cpid, n);
 }
-
-#define FN_BUF_SIZE 24
-
-static int conf_autorestart;
-static time_t autorestart_start_time;
-static time_t fs_time_offset;
-static int autorestart_slot = -1;
-#define AUTORESTART_POLLING_INTERVAL 10
-static void sigalrmhandler(int n)
-{
-	char fn[FN_BUF_SIZE];
-	char buf[STR_BUF_SIZE];
-	struct stat st;
-	time_t now;
-	
-	snprintf(fn, sizeof(fn), "work/wudata_%02u.ckp", autorestart_slot);
-	now = time(NULL) + fs_time_offset;
-	if (stat(fn, &st) == 0 && now - st.st_mtime >= 60 && st.st_mtime - autorestart_start_time > 60 * conf_autorestart) {
-		snprintf(buf, sizeof(buf),
-			"thekraken: autorestart: qualifying checkpoint identified "
-			"(start: %ld, now: %ld, mtime: %ld, conf: %d), restarting.\n",
-			autorestart_start_time,
-			now,
-			st.st_mtime,
-			conf_autorestart);
-		write(logfd, buf, strlen(buf));
-		kill(cpid, SIGKILL);
-		return;
-	}
-	alarm(AUTORESTART_POLLING_INTERVAL);
-}
-
-/*
- * Determine filesystem time offset (client residing on network file system)
- */
-static int determine_fs_time_offset(void)
-{
-	int fd;
-	struct stat st;
-
-	fd = open(".thekraken-timeref", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
-	if (fd == -1) {
-		return 1;
-	}
-	close(fd);
-	if (stat(".thekraken-timeref", &st) != 0) {
-		return 1;
-	}
-	fs_time_offset = st.st_mtime - time(NULL);
-
-	return 0;
-}
-
 
 static int do_install(char *s)
 {
@@ -295,20 +240,17 @@ static int list_uninstall(int options, int *counter, int *total)
 }
 
 
-#define CONF_NP 0           // override number of processors
-#define CONF_AUTORESTART 1  // restart the client after the first checkpoint is written
-#define CONF_STARTCPU 2     // bind the FahCore processes starting with this cpu
-#define CONF_MAX 3
+#define CONF_STARTCPU 0     // bind the FahCore processes starting with this cpu
+#define CONF_MAX 1
 
 static char **conf_line;
 static int conf_index;
 static int conf_total;
 static int conf_step = 4;
 
-static char *conf_key[] = { "np" , "autorestart", "startcpu", NULL };
+static char *conf_key[] = { "startcpu", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
-static int conf_np;
 static int conf_startcpu;
 
 static void conf_line_add(char *s)
@@ -324,34 +266,6 @@ static void conf_line_add(char *s)
 static int conf_validate_one(int n)
 {
 	int ret = 0;
-
-	if (n == CONF_NP && conf_val[CONF_NP]) {
-		char *end;
-
-		conf_np = strtol(conf_val[CONF_NP], &end, 10);
-		if (*end != '\0' || conf_np < 2 || conf_np > 128) {
-			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_NP], conf_val[CONF_NP]);
-			ret = 1;
-			conf_np = 0;
-		} else {
-			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_NP], conf_np);
-		}
-		return ret;
-	}
-	
-	if (n == CONF_AUTORESTART && conf_val[CONF_AUTORESTART]) {
-		char *end;
-		
-		conf_autorestart = strtol(conf_val[CONF_AUTORESTART], &end, 10);
-		if (*end != '\0' || conf_autorestart < 0 || conf_autorestart > 1) {
-			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_AUTORESTART], conf_val[CONF_AUTORESTART]);
-			ret = 1;
-			conf_autorestart = 0;
-		} else {
-			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_AUTORESTART], conf_autorestart);
-		}
-		return ret;
-	}
 
 	if (n == CONF_STARTCPU && conf_val[CONF_STARTCPU]) {
 		char *end;
@@ -538,14 +452,9 @@ int main(int ac, char **av)
 	int status;
 
 	int nclones = 0;
-	int next_cpu = 0;
+	int last_used_cpu = 0;
 	cpu_set_t cpuset;
 	
-	int i;
-	char **avclone;
-	
-	pid_t last_pid = -1;
-
 	s = strrchr(av[0], '/');
 	if (!s) {
 		s = av[0];
@@ -733,56 +642,9 @@ int main(int ac, char **av)
 	signal(SIGHUP, sighandler);
 	signal(SIGTERM, sighandler);
 	signal(SIGINT, sighandler);
-	signal(SIGALRM, sigalrmhandler);
 
-	/* set the next_cpu to the config setting (default: 0) */
-	next_cpu = conf_startcpu;
-
-	/* prep avclone early, need it for autorestart feature */
-	avclone = malloc((ac + 1) * sizeof(*avclone));
-	for (i = 0; i < ac; i++) {
-		avclone[i] = av[i];
-		if (conf_np && !strcmp(av[i], "-np")) {
-			avclone[i + 1] = conf_val[CONF_NP];
-			i++;
-		}
-	}
-	avclone[ac] = NULL;
-
-	/* autorestart: check if restart is necessary */
-	if (conf_autorestart) {
-		fprintf(logfp, "thekraken: autorestart: examining work directory...\n");
-
-		for (i = 0; i < 10; i++) {
-			struct stat st;
-			char fn[FN_BUF_SIZE];
-
-			snprintf(fn, sizeof(fn), "work/wudata_%02u.dat", i);
-			if (stat(fn, &st) == 0) {
-				if (autorestart_slot != -1) {
-					fprintf(logfp, "thekraken: autorestart: WARNING: multiple WUs in work directory (%u, %u, ...), bailing\n", autorestart_slot, i);
-					conf_autorestart = 0;
-					break;
-				}
-				autorestart_slot = i;
-				snprintf(fn, sizeof(fn), "work/wudata_%02u.ckp", i);
-				if (stat(fn, &st) == 0) {
-					fprintf(logfp, "thekraken: autorestart: unit %u already carries a checkpoint, bailing\n", i);
-					conf_autorestart = 0;
-					break;
-				}
-			}
-		}
-		
-		if (autorestart_slot == -1) {
-			fprintf(logfp, "thekraken: autorestart: WARNING: no WUs found, bailing\n");
-			conf_autorestart = 0;
-		}
-	}
-	fprintf(logfp, "thekraken: autorestart is %s\n", conf_autorestart ? "on" : "off");
-	if (conf_autorestart) {
-		fprintf(logfp, "thekraken: autorestart slot: %u\n", autorestart_slot);
-	}
+	/* set the last_used_cpu to the config setting (default: 0) */
+	last_used_cpu = conf_startcpu;
 
 	cpid = fork();
 	if (cpid == -1) {
@@ -799,24 +661,13 @@ int main(int ac, char **av)
 		}
 		fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns 0\n");
 		fprintf(logfp, "thekraken: child: Executing...\n");
-		execvp(nbin, avclone);
+		execvp(nbin, av);
 		fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
 		return -1;
 	}
 		
 	fprintf(logfp, "thekraken: Forked %d.\n", cpid);
 	
-	if (conf_autorestart) {
-		if (determine_fs_time_offset()) {
-			fprintf(logfp, "thekraken: autorestart: WARNING: couldn't determine filesystem time offset, disabling autorestart\n");
-			conf_autorestart = 0;
-		} else {
-			fprintf(logfp, "thekraken: autorestart: filesystem time offset: %ld seconds\n", fs_time_offset);
-			autorestart_start_time = time(NULL) + fs_time_offset;
-			alarm(AUTORESTART_POLLING_INTERVAL);
-		}
-	}
-
 	while (1) {
 		int rv;
 
@@ -838,43 +689,9 @@ int main(int ac, char **av)
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
-			static int autorestart_done;
-
 			/* signal sent by user to underlying FahCore */
 			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
 			
-			/* autorestart */
-			if (WTERMSIG(status) == SIGKILL && conf_autorestart && !autorestart_done) {
-				nclones--;
-				if (nclones >= 0)
-					fprintf(logfp, "thekraken: autorestart enabled, %d thread(s) left\n", nclones);
-				if (nclones != -1)
-					continue;
-				fprintf(logfp, "thekraken: main process exited, autorestarting...\n");
-
-				/* restart state machine */
-				nclones = 0;
-				next_cpu = conf_startcpu;
-
-				cpid = fork();
-				if (cpid == 0) {
-					long prv;
-					
-					prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
-					if (prv == 0) {
-						fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns 0\n");
-						fprintf(logfp, "thekraken: child: Executing...\n");
-						execvp(nbin, avclone);
-						fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
-					} else {
-						fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns -1 (errno %d)\n", errno);
-					}
-				} else if (cpid != -1) {
-					fprintf(logfp, "thekraken: Forked %d.\n", cpid);
-					autorestart_done = 1;
-					continue;
-				}
-			}
 			raise(WTERMSIG(status));
 			return -1;
 		}
@@ -895,18 +712,11 @@ int main(int ac, char **av)
 					fprintf(logfp, "thekraken: %d: cloned %d\n", rv, c);
 					nclones++;
 					if (nclones != 2 && nclones != 3) {
-						if (last_pid != -1) {
-							fprintf(logfp, "thekraken: [workaround for broken kernels] %d: binding to cpu %d\n", last_pid, next_cpu - 1);
-							CPU_ZERO(&cpuset);
-							CPU_SET(next_cpu - 1, &cpuset);
-							sched_setaffinity(last_pid, sizeof(cpuset), &cpuset);
-						}
-						fprintf(logfp, "thekraken: %d: binding to cpu %d\n", c, next_cpu);
+						fprintf(logfp, "thekraken: %d: binding to cpu %d\n", c, last_used_cpu);
 						CPU_ZERO(&cpuset);
-						CPU_SET(next_cpu, &cpuset);
-						next_cpu++;
+						CPU_SET(last_used_cpu, &cpuset);
+						last_used_cpu++;
 						sched_setaffinity(c, sizeof(cpuset), &cpuset);
-						last_pid = c;
 					}
 				} else if (e == 0) {
 					/* initial attach? */
