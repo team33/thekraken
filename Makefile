@@ -4,7 +4,7 @@ PREFIX=/usr
 PROJECT=thekraken
 PROJ_CFLAGS=-Wall -Wshadow -D_GNU_SOURCE -O2 $(CFLAGS)
 PROJ_LDFLAGS=$(LDFLAGS)
-PROJ_LIBS=-lrt -lm
+PROJ_LIBS=$(LIBS) -lrt -lm
 
 OBJROOT=obj
 OBJDIR=$(OBJROOT)

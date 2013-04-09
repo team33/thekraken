@@ -87,6 +87,15 @@ static void sighandler(int n)
 	kill(cpid, n);
 }
 
+static void sigalrmhandler(int n)
+{
+	char buf[STR_BUF_SIZE];
+
+	snprintf(buf, sizeof(buf), "thekraken: %d: (sigalrmhandler) reached startup deadline, killing FahCore\n", getpid());
+	write(logfd, buf, strlen(buf));
+	kill(cpid, SIGKILL);
+}
+
 static int do_install(char *s)
 {
 	int fd1, fd2;
@@ -253,20 +262,24 @@ static int list_uninstall(int options, int *counter, int *total)
 #define CONF_DLBLOAD_ONPERIOD 2
 #define CONF_DLBLOAD_OFFPERIOD 3
 #define CONF_DLBLOAD_DEADLINE 4
-#define CONF_MAX 5
+#define CONF_STARTUP_DEADLINE 5
+#define CONF_V 6
+#define CONF_MAX 7
 
 #define DEFAULT_STARTCPU 0
 #define DEFAULT_DLBLOAD 1
 #define DEFAULT_DLBLOAD_ONPERIOD 8000
 #define DEFAULT_DLBLOAD_OFFPERIOD 200
 #define DEFAULT_DLBLOAD_DEADLINE 300000 /* 5 minutes */
+#define DEFAULT_STARTUP_DEADLINE 300 /* 5 minutes */
+#define DEFAULT_V 0
 
 static char **conf_line;
 static int conf_index;
 static int conf_total;
 static int conf_step = 4;
 
-static char *conf_key[] = { "startcpu", "dlbload", "dlbload_onperiod", "dlbload_offperiod", "dlbload_deadline", NULL };
+static char *conf_key[] = { "startcpu", "dlbload", "dlbload_onperiod", "dlbload_offperiod", "dlbload_deadline", "startup_deadline", "v", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
 static unsigned int conf_startcpu = DEFAULT_STARTCPU;
@@ -274,6 +287,8 @@ static unsigned int conf_dlbload = DEFAULT_DLBLOAD;
 static unsigned int conf_dlbload_onperiod = DEFAULT_DLBLOAD_ONPERIOD;
 static unsigned int conf_dlbload_offperiod = DEFAULT_DLBLOAD_OFFPERIOD;
 static unsigned int conf_dlbload_deadline = DEFAULT_DLBLOAD_DEADLINE;
+static unsigned int conf_startup_deadline = DEFAULT_STARTUP_DEADLINE;
+static unsigned int conf_v = DEFAULT_V;
 
 static void conf_line_add(char *s)
 {
@@ -351,6 +366,32 @@ static int conf_validate_one(int n)
 			conf_dlbload_deadline = DEFAULT_DLBLOAD_DEADLINE;
 		} else {
 			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_DLBLOAD_DEADLINE], conf_dlbload_deadline);
+		}
+		return ret;
+	}
+	if (n == CONF_STARTUP_DEADLINE && conf_val[CONF_STARTUP_DEADLINE]) {
+		char *end;
+		
+		conf_startup_deadline = strtol(conf_val[CONF_STARTUP_DEADLINE], &end, 10);
+		if (*end != '\0') {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_STARTUP_DEADLINE], conf_val[CONF_STARTUP_DEADLINE]);
+			ret = 1;
+			conf_startup_deadline = DEFAULT_STARTUP_DEADLINE;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_STARTUP_DEADLINE], conf_startup_deadline);
+		}
+		return ret;
+	}
+	if (n == CONF_V && conf_val[CONF_V]) {
+		char *end;
+		
+		conf_v = strtol(conf_val[CONF_V], &end, 10);
+		if (*end != '\0') {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_V], conf_val[CONF_V]);
+			ret = 1;
+			conf_v = DEFAULT_V;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_V], conf_v);
 		}
 		return ret;
 	}
@@ -770,6 +811,7 @@ int main(int ac, char **av)
 	signal(SIGTERM, sighandler);
 	signal(SIGINT, sighandler);
 	signal(SIGTSTP, sighandler);
+	signal(SIGALRM, sigalrmhandler);
 
 	/* set the last_used_cpu to the config setting (default: 0) */
 	last_used_cpu = conf_startcpu;
@@ -880,11 +922,18 @@ int main(int ac, char **av)
 						last_used_cpu++;
 						sched_setaffinity(c, sizeof(cpuset), &cpuset);
 					}
-					if (nclones == 1 && conf_dlbload == 1) {
-						fprintf(logfp, "thekraken: %d: talkative FahCore process identified (%d); listening to syscalls\n", rv, c);
-						tpid = c;
+					if (nclones == 1) {
+						if (conf_dlbload == 1) {
+							fprintf(logfp, "thekraken: %d: talkative FahCore process identified (%d), listening to syscalls\n", rv, c);
+							tpid = c;
+						}
+						if (conf_startup_deadline != 0) {
+							fprintf(logfp, "thekraken: %d: startup deadline in %d seconds\n", rv, conf_startup_deadline);
+							alarm(conf_startup_deadline);
+							tpid = c;
+						}
 					}
-					
+
 					/*
 					 * The following's quite dirty; we're relying on the fact that
 					 * tpid clones add'l threads; if that wasn't the case, calling
@@ -917,16 +966,26 @@ int main(int ac, char **av)
 							getstr(rv, msgaddr, msglen, fahcore_logbuf, &fahcore_logbufpos, sizeof(fahcore_logbuf));
 							if (strchr(fahcore_logbuf, '\n') != NULL) {
 								if (strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
-									int dlbload_workers = (nclones - 2) / 2;
+									fprintf(logfp, "thekraken: %d: first step identified\n", rv);
+									if (conf_dlbload) {
+										int dlbload_workers = (nclones - 2) / 2;
 
-									fprintf(logfp, "thekraken: %d: first step identified, creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
-									synthload_start_time = time(NULL);
-									mpid = synthload_start(conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline, dlbload_workers, conf_startcpu);
-									if (mpid < 0) {
-										fprintf(logfp, "thekraken: synthload_start failed: %s (rv: %d)\n", strerror(errno), mpid);
-										tpid = -1;
+										fprintf(logfp, "thekraken: %d: creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
+										synthload_start_time = time(NULL);
+										mpid = synthload_start(conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline, dlbload_workers, conf_startcpu);
+										if (mpid < 0) {
+											fprintf(logfp, "thekraken: %d: synthload_start failed: %s (rv: %d)\n", rv, strerror(errno), mpid);
+											tpid = -1;
+										}
+										fprintf(logfp, "thekraken: %d: synthload manager created (%d)\n", rv, mpid);
 									}
-									fprintf(logfp, "thekraken: %d: synthload manager created (%d)\n", rv, mpid);
+									if (conf_startup_deadline != 0) {
+										fprintf(logfp, "thekraken: %d: startup complete\n", rv);
+										alarm(0);
+										if (!conf_dlbload) {
+											tpid = -1;
+										}
+									}
 								}
 								fahcore_logbufpos = 0;
 							}
