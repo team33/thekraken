@@ -294,18 +294,21 @@ static int list_uninstall(int options, int *counter, int *total)
 	return ret;
 }
 
-#define CONF_NP 0
-#define CONF_AUTORESTART 1
+
+#define CONF_NP 0           // override number of processors
+#define CONF_AUTORESTART 1  // restart the client after the first checkpoint is written
+#define CONF_STARTCPU 2     // bind the FahCore processes starting with this cpu
 
 static char **conf_line;
 static int conf_index;
 static int conf_total;
 static int conf_step = 4;
 
-static char *conf_key[] = { "np" , "autorestart", NULL };
+static char *conf_key[] = { "np" , "autorestart", "startcpu", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
 static int conf_np;
+static int conf_startcpu;
 
 static void conf_line_add(char *s)
 {
@@ -381,10 +384,10 @@ static int conf_file_parse(char *fn)
 
 		conf_np = strtol(conf_val[CONF_NP], &end, 10);
 		if (*end != '\0' || conf_np < 2 || conf_np > 32) {
-			fprintf(logfp, "thekraken: invalid value for 'np', ignored\n");
+			fprintf(logfp, "thekraken: invalid value for '%s', ignored\n", conf_key[CONF_NP]);
 			conf_np = 0;
 		} else {
-			fprintf(logfp, "thekraken: config: np=%d\n", conf_np);
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_NP], conf_np);
 		}
 	}
 	
@@ -393,10 +396,22 @@ static int conf_file_parse(char *fn)
 		
 		conf_autorestart = strtol(conf_val[CONF_AUTORESTART], &end, 10);
 		if (*end != '\0' || conf_autorestart < 0) {
-			fprintf(logfp, "thekraken: invalid value for 'autorestart', ignored\n");
+			fprintf(logfp, "thekraken: invalid value for '%s', ignored\n", conf_key[CONF_AUTORESTART]);
 			conf_autorestart = 0;
 		} else {
-			fprintf(logfp, "thekraken: config: autorestart=%d\n", conf_autorestart);
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_AUTORESTART], conf_autorestart);
+		}
+	}
+
+	if (conf_val[CONF_STARTCPU]) {
+		char *end;
+		
+		conf_startcpu = strtol(conf_val[CONF_STARTCPU], &end, 10);
+		if (*end != '\0' || conf_startcpu < 0) {
+			fprintf(logfp, "thekraken: invalid value for '%s', ignored\n", conf_key[CONF_STARTCPU]);
+			conf_startcpu = 0;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_STARTCPU], conf_startcpu);
 		}
 	}
 	return 0;
@@ -693,6 +708,9 @@ int main(int ac, char **av)
 	signal(SIGINT, sighandler);
 	signal(SIGALRM, sigalrmhandler);
 
+	/* set the last_used_cpu to the config setting (default: 0) */
+	last_used_cpu = conf_startcpu;
+
 	/* prep avclone early, need it for autorestart feature */
 	avclone = malloc((ac + 1) * sizeof(*avclone));
 	for (i = 0; i < ac; i++) {
@@ -809,7 +827,7 @@ int main(int ac, char **av)
 
 				/* restart state machine */
 				nclones = 0;
-				last_used_cpu = 0;
+				last_used_cpu = conf_startcpu;
 
 				cpid = fork();
 				if (cpid == 0) {
