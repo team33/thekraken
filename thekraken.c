@@ -537,17 +537,6 @@ static void getstr(pid_t child, long addr, int len, char *dst, int *dstofs, int 
 	*dstofs = curstr - dst;
 }
 
-static char* gettimestr(char *dst)
-{
-	if(dst == NULL)
-		return NULL;
-
-	time_t tm_t = time(NULL);
-	struct tm *ltime = localtime(&tm_t);
-	sprintf(dst, "%02d:%02d:%02d", ltime->tm_hour, ltime->tm_min, ltime->tm_sec);
-	return dst;
-}
-
 int main(int ac, char **av)
 {
 	char nbin[PATH_MAX];
@@ -561,7 +550,6 @@ int main(int ac, char **av)
 	int nclones = 0;
 	int last_used_cpu = 0;
 	cpu_set_t cpuset;
-	char timestr[10];
 
 	pid_t tpid = 0; /* traced (syscall) thread PID */
 	pid_t mpid = 0; /* load manager PID */
@@ -575,6 +563,8 @@ int main(int ac, char **av)
 	int fahcore_errbufpos = 0;
 
 	int tpid_insyscall = 0;
+	
+	time_t synthload_start_time;
 
 	s = strrchr(av[0], '/');
 	if (!s) {
@@ -800,14 +790,15 @@ int main(int ac, char **av)
 			}
 			return -1;
 		}
-		if(rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
+		if (rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
 			fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x\n", rv, status);
 
 		if (WIFEXITED(status)) {
 			fprintf(logfp, "thekraken: %d: exited with %d\n", rv, WEXITSTATUS(status));
 			if (rv == mpid) {
-				/* synthload manager exited */
-				fprintf(logfp, "thekraken: %d: [%s] synthetic load manager exit\n", rv, gettimestr(timestr));
+				time_t runtime = time(NULL) - synthload_start_time;
+
+				fprintf(logfp, "thekraken: %d: synthetic load manager exited (run time: %ld seconds)\n", rv, runtime);
 				tpid = -1;
 				continue;
 			}
@@ -819,10 +810,19 @@ int main(int ac, char **av)
 		}
 		if (WIFSIGNALED(status)) {
 			/* fatal signal sent by user to/raied by underlying FahCore */
-			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
+			fprintf(logfp, "thekraken: %d: terminated by signal %d\n", rv, WTERMSIG(status));
 
-			if (rv == mpid)
+			if (rv == mpid) {
+				time_t runtime = time(NULL) - synthload_start_time;
+				
+				fprintf(logfp, "thekraken: %d: synthetic load manager terminated (run time: %ld seconds)\n", rv, runtime);
+				tpid = -1;
 				continue;
+			}
+			if (rv != cpid) {
+				fprintf(logfp, "thekraken: %d: ignoring clone termination\n", rv);
+				continue;
+			}
 			
 			raise(WTERMSIG(status));
 			return -1;
@@ -830,9 +830,8 @@ int main(int ac, char **av)
 		if (WIFSTOPPED(status)) {
 			int e;
 			long prv;
-			//struct user_regs_struct regs; // stack examination?
 
-			if(rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
+			if (rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
 				fprintf(logfp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
 
 			if (WSTOPSIG(status) == SIGTRAP) {
@@ -855,14 +854,14 @@ int main(int ac, char **av)
 					fprintf(logfp, "thekraken: %d: cloned %d\n", rv, c);
 					nclones++;
 					if (nclones != 2 && nclones != 3) {
-						fprintf(logfp, "thekraken: %d: binding to cpu %d\n", c, last_used_cpu);
+						fprintf(logfp, "thekraken: %d: binding %d to cpu %d\n", rv, c, last_used_cpu);
 						CPU_ZERO(&cpuset);
 						CPU_SET(last_used_cpu, &cpuset);
 						last_used_cpu++;
 						sched_setaffinity(c, sizeof(cpuset), &cpuset);
 					}
 					if (nclones == 1 && conf_dlbload == 1) {
-						fprintf(logfp, "thekraken: %d: talkative FahCore process; listening to syscalls\n", c);
+						fprintf(logfp, "thekraken: %d: talkative FahCore process identified (%d); listening to syscalls\n", rv, c);
 						tpid = c;
 					}
 					
@@ -872,6 +871,7 @@ int main(int ac, char **av)
 					 * ptrace(PTRACE_SYSCALL, tpid, ...) would be challenging...
 					 */
 					if (rv == tpid) {
+						fprintf(logfp, "thekraken: %d: Continuing (SYSCALL).\n", rv);
 						prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
 					} else {
 						fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
@@ -895,12 +895,12 @@ int main(int ac, char **av)
 						if (!tpid_insyscall) {
 							tpid_insyscall = 1;
 							getstr(rv, msgaddr, msglen, fahcore_logbuf, &fahcore_logbufpos, sizeof(fahcore_logbuf));
-							if(strchr(fahcore_logbuf, '\n') != NULL) {
-								if(strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
+							if (strchr(fahcore_logbuf, '\n') != NULL) {
+								if (strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
 									int dlbload_workers = (nclones - 2) / 2;
 
-									fprintf(logfp, "thekraken: %d: [%s] first step identified\n", rv, gettimestr(timestr));
-									fprintf(logfp, "thekraken: %d: creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
+									fprintf(logfp, "thekraken: %d: first step identified, creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
+									synthload_start_time = time(NULL);
 									mpid = synthload_start(conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline, dlbload_workers, conf_startcpu);
 									if (mpid < 0) {
 										fprintf(logfp, "thekraken: synthload_start failed: %s (rv: %d)\n", strerror(errno), mpid);
@@ -920,11 +920,11 @@ int main(int ac, char **av)
 						if (!tpid_insyscall) {
 							tpid_insyscall = 1;
 							getstr(rv, msgaddr, msglen, fahcore_errbuf, &fahcore_errbufpos, sizeof(fahcore_errbuf));
-							if(strchr(fahcore_errbuf, '\n') != NULL) {
-								if(strstr(fahcore_errbuf, "Turning on dynamic load balancing") != NULL) {
-									fprintf(logfp, "thekraken: %d: [%s] DLB has engaged; killing synthetic load manager (%d)\n", rv, gettimestr(timestr), mpid);
+							if (strchr(fahcore_errbuf, '\n') != NULL) {
+								if (strstr(fahcore_errbuf, "Turning on dynamic load balancing") != NULL) {
+									fprintf(logfp, "thekraken: %d: DLB has engaged; killing synthetic load manager (%d)\n", rv, mpid);
 									kill(mpid, SIGTERM);
-									tpid = -1; // don't monitor the talkative thread anymore
+									tpid = -1; /* don't monitor the talkative thread anymore */
 								}
 								fahcore_errbufpos = 0;
 							}
@@ -946,7 +946,10 @@ int main(int ac, char **av)
 				continue;
 			}
 
-			if (WSTOPSIG(status) == SIGSTOP) {
+			if (rv == tpid)
+				tpid_insyscall = 0; /* any syscalls have been interrupted */
+
+			if (WSTOPSIG(status) == SIGSTOP || WSTOPSIG(status) == SIGTERM) {
 				fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
 				prv = ptrace(PTRACE_CONT, rv, 0, 0);
 				continue;
