@@ -71,7 +71,7 @@ static char *k_getwd(void)
 	return getcwd(wdbuf, sizeof(wdbuf));
 }
 
-#define STR_BUF_SIZE 96
+#define STR_BUF_SIZE 144
 static void sighandler(int n)
 {
 	char buf[STR_BUF_SIZE];
@@ -83,6 +83,8 @@ static void sighandler(int n)
 
 #define FN_BUF_SIZE 24
 
+static int conf_autorestart;
+static time_t autorestart_start_time;
 static int autorestart_slot = -1;
 #define AUTORESTART_POLLING_INTERVAL 10
 static void sigalrmhandler(int n)
@@ -90,10 +92,18 @@ static void sigalrmhandler(int n)
 	char fn[FN_BUF_SIZE];
 	char buf[STR_BUF_SIZE];
 	struct stat st;
+	time_t now;
 	
 	snprintf(fn, sizeof(fn), "work/wudata_%02u.ckp", autorestart_slot);
-	if (lstat(fn, &st) == 0 && time(NULL) - st.st_mtime >= 60) {
-		snprintf(buf, sizeof(buf), "thekraken: autorestart: qualifying checkpoint identified, restarting.\n");
+	now = time(NULL);
+	if (lstat(fn, &st) == 0 && now - st.st_mtime >= 60 && st.st_mtime - autorestart_start_time > 60 * conf_autorestart) { 
+		snprintf(buf, sizeof(buf),
+			"thekraken: autorestart: qualifying checkpoint identified "
+			"(start: %ld, now: %ld, mtime: %ld, conf: %d), restarting.\n",
+			autorestart_start_time,
+			now,
+			st.st_mtime,
+			conf_autorestart);
 		write(logfd, buf, strlen(buf));
 		kill(cpid, SIGKILL);
 		return;
@@ -272,8 +282,7 @@ static int conf_step = 4;
 static char *conf_key[] = { "np" , "autorestart", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
-static int conf_np = 0;
-static int conf_autorestart = 0;
+static int conf_np;
 
 static void conf_line_add(char *s)
 {
@@ -360,7 +369,7 @@ static int conf_file_parse(char *fn)
 		char *end;
 		
 		conf_autorestart = strtol(conf_val[CONF_AUTORESTART], &end, 10);
-		if (*end != '\0' || conf_autorestart < 0 || conf_autorestart > 1) {
+		if (*end != '\0' || conf_autorestart < 0) {
 			fprintf(logfp, "thekraken: invalid value for 'autorestart', ignored\n");
 			conf_autorestart = 0;
 		} else {
@@ -730,7 +739,8 @@ int main(int ac, char **av)
 	fprintf(logfp, "thekraken: Forked %d.\n", cpid);
 	
 	if (conf_autorestart) {
-		 alarm(AUTORESTART_POLLING_INTERVAL);
+		autorestart_start_time = time(NULL);
+		alarm(AUTORESTART_POLLING_INTERVAL);
 	}
 
 	while (1) {
