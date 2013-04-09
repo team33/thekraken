@@ -8,14 +8,14 @@ Contents:
 4. Upgrade recommendations
 4.1. Upgrade recommendations: from The Kraken 0.2
 4.2. Upgrade recommendations: from The Kraken 0.3
-4.3. Upgrading from The Kraken 0.4 or The Kraken 0.6-pre4
+4.3. Upgrading from The Kraken 0.4, The Kraken 0.6-pre4 or The Kraken 0.6
 5. Building The Kraken
 5.1. Pre-requisites
 5.2. Building
 6. Installation
 6.1. Installation: V6 client
 6.2. Installation: V7 client
-6.3. Autorestart feature
+6.3. Dynamic Load Balancing
 7. Uninstallation
 8. How do I know it's working?
 9. Known issues and caveats
@@ -35,6 +35,9 @@ Contents:
 
   The Kraken wraps around FahCore binaries and sets CPU affinity as soon
   as subsequent worker threads get created.
+
+  It also creates synthetic load with the intent of triggering DLB (Dynamic
+  Load Balancing) which improves performance in majority of configurations.
 
 
 
@@ -113,8 +116,9 @@ Contents:
     2. Go to client directory (shutting the client down is not required)
     3. Run 'thekraken -u'; it should give output similar to the following:
 
+
        $ thekraken -u
-       thekraken: The Kraken 0.6 (compiled Sun Nov  6 13:31:04 MST 2011 by fah@goldfinger)
+       thekraken: The Kraken 0.7 (compiled Sat May 19 10:47:58 MDT 2012 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing uninstallation from .
@@ -124,10 +128,11 @@ Contents:
        thekraken: finished uninstallation, 2 out of 2 file(s) processed
        $ 
 
+
     4. Run 'thekraken -i'; it should give output similar to the following:
 
        $ thekraken -i
-       thekraken: The Kraken 0.6 (compiled Sun Nov  6 13:31:04 MST 2011 by fah@goldfinger)
+       thekraken: The Kraken 0.7 (compiled Sat May 19 10:47:58 MDT 2012 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing installation to .
@@ -176,7 +181,7 @@ Contents:
        Doing so should result in something along the following:
 
        $ thekraken -i
-       thekraken: The Kraken 0.6 (compiled Sun Nov  6 13:31:04 MST 2011 by fah@goldfinger)
+       thekraken: The Kraken 0.7 (compiled Sat May 19 10:47:58 MDT 2012 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing installation to .
@@ -231,7 +236,7 @@ Contents:
 
 
 
-6.3. Autorestart feature
+6.3. Dynamic Load Balancing
 
     Background: GROMACS employs Dynamic Load Balancing (DLB)
     feature that aims at improving performance.
@@ -248,27 +253,16 @@ Contents:
     several minutes into WU; at other times it may be as late
     as 90% into WU, sometimes it doesn't engage at all).
 
-    It has been determined that restarting WU from a checkpoint
-    significantly increases probability of almost-instantaneous
-    DLB engagement (with P6903 and P6904 units).
+    The Kraken 0.7 features a novel way of making FahCores enable
+    DLB. It creates synthetic load on every other CPU; said load comes
+    and goes (with certain duty cycle) until DLB is engaged or until
+    deadline is reached (5 minutes by default).
 
-    Autorestart feature, when enabled, makes The Kraken restart
-    FahCore upon completed write of first checkpoint (15 minutes
-    in typical configuration).
-
-    To enable autorestart feature add '-c autorestart=1' parameter
-    to the command line, when installing, e.g. 'thekraken -i -c autorestart=1'.
-    If already installed, uninstall, then install with '-c autorestart=1'.
+    DLB triggering is enabled by default. To disable it, add '-c dlbload=0'
+    parameter to the command line, when installing, e.g.
+    'thekraken -i -c dlbload=0'.
+    If already installed, uninstall, then install with '-c dlbload=0'.
     Stopping the client is not required.
-
-    NOTE: when enabled, FahCore will appear to have "started twice"
-          or restarted without user interaction; this is expected
-          and normal
-
-    NOTE: autorestart feature isn't guaranteed; DLB may not always engage
-
-    NOTE: DLB enagagement on units other than P6903 and P6904
-          is rare
 
 
 
@@ -379,6 +373,7 @@ Contents:
 11. Credits
 
     The Kraken was written and is maintained by Kris Rusocki <kszysiu@gmail.com>
+    Synthload DLB research and coding was done by Stephen Gordon <firedfly@gmail.com>
 
     Special thanks go to:
 

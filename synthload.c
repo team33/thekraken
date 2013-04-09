@@ -150,9 +150,8 @@ pid_t synthload_start(unsigned int onperiod, unsigned int offperiod, unsigned in
 		sigemptyset(&sa.sa_mask);
 		sigaction(SIGALRM, &sa, NULL);
 
-		int status = create_workers(workers-1, startcpu+3, onperiod, offperiod, deadline);
-		if(status == -1)
-			return status;
+		if (create_workers(workers-1, startcpu+3, onperiod, offperiod, deadline) != 0)
+			return -2;
 
 		setup_alarms(onperiod, offperiod, deadline);
 		load();

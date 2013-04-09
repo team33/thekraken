@@ -60,17 +60,15 @@
 static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, NULL };
 
 extern char **environ;
-static pid_t cpid;
+
 static FILE *logfp;
 static int logfd;
 
-#define LOG_BUF_SIZE 128
-#define LOG_FD 5
-static pid_t tpid, mpid;
-static int tpid_log_insyscall, tpid_err_insyscall;
-
 static int debug_level;
 #define debug(_lev) if (debug_level >= _lev)
+
+static pid_t cpid; /* FahCore PID */
+
 
 static int custom_config;
 
@@ -251,7 +249,7 @@ static int list_uninstall(int options, int *counter, int *total)
 }
 
 
-#define CONF_STARTCPU 0 // bind the FahCore processes starting with this cpu
+#define CONF_STARTCPU 0 /* bind FahCore threads starting with this cpu */
 #define CONF_DLBLOAD 1
 #define CONF_DLBLOAD_ONPERIOD 2
 #define CONF_DLBLOAD_OFFPERIOD 3
@@ -262,7 +260,7 @@ static int list_uninstall(int options, int *counter, int *total)
 #define DEFAULT_DLBLOAD 1
 #define DEFAULT_DLBLOAD_ONPERIOD 8000
 #define DEFAULT_DLBLOAD_OFFPERIOD 200
-#define DEFAULT_DLBLOAD_DEADLINE 300000 // 5 minutes
+#define DEFAULT_DLBLOAD_DEADLINE 300000 /* 5 minutes */
 
 static char **conf_line;
 static int conf_index;
@@ -565,11 +563,18 @@ int main(int ac, char **av)
 	cpu_set_t cpuset;
 	char timestr[10];
 
+	pid_t tpid = 0; /* traced (syscall) thread PID */
+	pid_t mpid = 0; /* load manager PID */
+
+#define FAHCORE_BUF_SIZE 128
+#define FAHCORE_LOG_FD 5
 	/* setup the buffer to store data written to logfile_xx.txt and stderr */
-	char logbuf[LOG_BUF_SIZE];
-	int logbufpos = 0;
-	char errbuf[LOG_BUF_SIZE];
-	int errbufpos = 0;
+	char fahcore_logbuf[FAHCORE_BUF_SIZE];
+	int fahcore_logbufpos = 0;
+	char fahcore_errbuf[FAHCORE_BUF_SIZE];
+	int fahcore_errbufpos = 0;
+
+	int tpid_insyscall = 0;
 
 	s = strrchr(av[0], '/');
 	if (!s) {
@@ -813,10 +818,10 @@ int main(int ac, char **av)
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
-			/* signal sent by user to underlying FahCore */
+			/* fatal signal sent by user to/raied by underlying FahCore */
 			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
 
-			if (rv != cpid)
+			if (rv == mpid)
 				continue;
 			
 			raise(WTERMSIG(status));
@@ -886,49 +891,49 @@ int main(int ac, char **av)
 					msgaddr = regs.rsi;
 					msglen = regs.rdx;
 
-					if (call == SYS_write && fd == LOG_FD) {
-						if (!tpid_log_insyscall) {
-							tpid_log_insyscall = 1;
-							getstr(rv, msgaddr, msglen, logbuf, &logbufpos, sizeof(logbuf));
-							if(strchr(logbuf, '\n') != NULL) {
-								if(strstr(logbuf, "Completed ") != NULL && strstr(logbuf, "out of") != NULL) {
+					if (call == SYS_write && fd == FAHCORE_LOG_FD) {
+						if (!tpid_insyscall) {
+							tpid_insyscall = 1;
+							getstr(rv, msgaddr, msglen, fahcore_logbuf, &fahcore_logbufpos, sizeof(fahcore_logbuf));
+							if(strchr(fahcore_logbuf, '\n') != NULL) {
+								if(strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
 									int dlbload_workers = (nclones - 2) / 2;
 
 									fprintf(logfp, "thekraken: %d: [%s] first step identified\n", rv, gettimestr(timestr));
 									fprintf(logfp, "thekraken: %d: creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
 									mpid = synthload_start(conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline, dlbload_workers, conf_startcpu);
-									if(mpid == -1) {
-										fprintf(logfp, "thekraken: synthload_start error: %s\n", strerror(errno));
-										return -1;
+									if (mpid < 0) {
+										fprintf(logfp, "thekraken: synthload_start failed: %s (rv: %d)\n", strerror(errno), mpid);
+										tpid = -1;
 									}
 								}
-								logbufpos = 0;
+								fahcore_logbufpos = 0;
 							}
-							if (logbufpos == sizeof(logbuf) - 1) {
+							if (fahcore_logbufpos == sizeof(fahcore_logbuf) - 1) {
 								fprintf(logfp, "thekraken: %d: log buffer overflow! Clearing the buffer.\n", rv);
-								logbufpos = 0;
+								fahcore_logbufpos = 0;
 							}
 						} else {
-							tpid_log_insyscall = 0;
+							tpid_insyscall = 0;
 						}
 					} else if (call == SYS_write && fd == STDERR_FILENO) {
-						if (!tpid_err_insyscall) {
-							tpid_err_insyscall = 1;
-							getstr(rv, msgaddr, msglen, errbuf, &errbufpos, sizeof(errbuf));
-							if(strchr(errbuf, '\n') != NULL) {
-								if(strstr(errbuf, "Turning on dynamic load balancing") != NULL) {
+						if (!tpid_insyscall) {
+							tpid_insyscall = 1;
+							getstr(rv, msgaddr, msglen, fahcore_errbuf, &fahcore_errbufpos, sizeof(fahcore_errbuf));
+							if(strchr(fahcore_errbuf, '\n') != NULL) {
+								if(strstr(fahcore_errbuf, "Turning on dynamic load balancing") != NULL) {
 									fprintf(logfp, "thekraken: %d: [%s] DLB has engaged; killing synthetic load manager (%d)\n", rv, gettimestr(timestr), mpid);
 									kill(mpid, SIGTERM);
 									tpid = -1; // don't monitor the talkative thread anymore
 								}
-								errbufpos = 0;
+								fahcore_errbufpos = 0;
 							}
-							if (errbufpos == sizeof(errbuf) - 1) {
+							if (fahcore_errbufpos == sizeof(fahcore_errbuf) - 1) {
 								fprintf(logfp, "thekraken: %d: stderr buffer overflow! Clearing the buffer.\n", rv);
-								errbufpos = 0;
+								fahcore_errbufpos = 0;
 							}
 						} else {
-							tpid_err_insyscall = 0;
+							tpid_insyscall = 0;
 						}
 					}
 					/* talkative FahCore process; notify us of the next syscall entry/exit */
