@@ -30,7 +30,7 @@
 #include <sys/stat.h>
 #include <linux/ptrace.h>
 
-#define WELCOME_LINES "thekraken: The Kraken 0.2\nthekraken: Processor affinity wrapper for Folding@Home\nthekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\n"
+#define WELCOME_LINES "thekraken: The Kraken 0.3\nthekraken: Processor affinity wrapper for Folding@Home\nthekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\n"
 #define CA5_ROOT "FahCore_a5"
 #define CA3_ROOT "FahCore_a3"
 #define CA5 "FahCore_a5.exe"
@@ -161,15 +161,15 @@ int main(int ac, char **av)
 	int nclones = 0;
 	int lastcpu = 0;
 	cpu_set_t cpuset;
-
+	
 	if (strstr(av[0], "thekraken")) {
 		int c; 
-		int opt_install = 0, opt_uninstall = 0, opt_help = 0;
+		int opt_install = 0, opt_uninstall = 0, opt_help = 0, opt_yes = 0;
 		char *path = NULL;
 		
 		fprintf(stderr, WELCOME_LINES);
 		opterr = 0;
-		while ((c = getopt(ac, av, "+iuh")) != -1) {
+		while ((c = getopt(ac, av, "+iuhy")) != -1) {
 			switch (c) {
 				case 'i':
 					opt_install = 1;
@@ -180,55 +180,84 @@ int main(int ac, char **av)
 				case 'h':
 					opt_help = 1;
 					break;
+				case 'y':
+					opt_yes = 1;
+					break;
 				case '?':
-					fprintf(stderr, "thekraken: error: unknown option: -%c\n", optopt);
+					fprintf(stderr, "thekraken: error: option not recognized: -%c\n", optopt);
 					return -1;
 				default:
 					fprintf(stderr, "thekraken: internal error (1); please report this issue\n");
 					return -1;
 			}
 		}
-		if (!opt_install && !opt_uninstall) {
-			opt_help = 1;
+		if (opt_install || opt_uninstall) {
+			if (optind + 1 < ac) {
+				fprintf(stderr, "thekraken: error: parameter not recognized: %s\n", av[optind + 1]);
+				return -1;
+			}
+		} else {
+			if (optind == ac) {
+				opt_help = 1;
+			} else {
+				fprintf(stderr, "thekraken: error: parameter not recognized: %s\n", av[optind]);
+				return -1;
+			}
 		}
 		if (opt_help == 1) {
-			//usage(av[0]);
-			fprintf(stderr, "thekraken: to install run `%s -i', to uninstall run `%s -u'\n", av[0], av[0]);
+			fprintf(stderr, "Usage:\n");
+			fprintf(stderr, "\t%s [-y] -i [path]\n", av[0]);
+			fprintf(stderr, "\t%s [-y] -u [path]\n", av[0]);
+			fprintf(stderr, "\t%s -h\n", av[0]);
+			fprintf(stderr, "\n");
+			fprintf(stderr, "Options:\n");
+			fprintf(stderr, "\t-i [path]\tinstall The Kraken in 'path' directory and all its\n");
+			fprintf(stderr, "\t\t\tsubdirectories; if path is omitted, current directory\n");
+			fprintf(stderr, "\t\t\tis used\n");
+			fprintf(stderr, "\t-u [path]\tuninstall The Kraken from 'path' directory and all its\n");
+			fprintf(stderr, "\t\t\tsubdirectories; if path is omitted, current directory\n");
+			fprintf(stderr, "\t\t\tis used\n");
+			fprintf(stderr, "\t-y\t\tdo not ask for confirmation (non-interactive mode)\n");
+			fprintf(stderr, "\t-h\t\tdisplay this help and exit\n");
 			return 0;
 		}
 		if (opt_install && opt_uninstall) {
 			fprintf(stderr, "thekraken: error: can't install and uninstall at the same time; choose one\n");
 			return -1;
 		}
-		if (optind + 1 < ac) {
-			fprintf(stderr, "thekraken: error: extra argument: %s\n", av[optind + 1]);
-			return -1;
-		}
 		if (optind < ac) {
 			path = av[optind];
 		}
+		if (path == NULL) {
+			path = ".";
+		}
 		if (opt_install) {
-			fprintf(stderr, "thekraken: performing installation\n");
-			fprintf(stderr, "dir: %s\n", path);
+			fprintf(stderr, "thekraken: performing installation to %s\n", path);
+			rv = traverse(path, 0, opt_yes);
+#if 0
 			rv = install(CA5);
 			install_summary(CA5, rv);
 			rv = install(CA3);
 			install_summary(CA3, rv);
-			fprintf(stderr, "thekraken: finished installation\n");
+#endif
+			fprintf(stderr, "thekraken: finished installation, %d files processed\n", rv);
 			return 0;
 		}
 		if (opt_uninstall) {
-			fprintf(stderr, "thekraken: performing uninstallation\n");
+			fprintf(stderr, "thekraken: performing uninstallation from %s\n", path);
+			rv = traverse(path, 1, opt_yes);
+#if 0
 			rv = uninstall(CA5);
 			uninstall_summary(CA5, rv);
 			rv = uninstall(CA3);
 			uninstall_summary(CA3, rv);
-			fprintf(stderr, "thekraken: finished uninstallation\n");
+#endif
+			fprintf(stderr, "thekraken: finished uninstallation, %d files processed\n", rv);
 			return 0;
 		}
 
 		/* just in case someone breaks the code*/
-		fprintf(stderr, "thekraken: internal error (2); please report this issue\n");
+		fprintf(stderr, "thekraken: internal error (3); please report this issue\n");
 
 		return -1;
 	}
