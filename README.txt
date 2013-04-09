@@ -147,7 +147,7 @@ Contents:
 
        Doing so should result in something along the following:
 
-       $ sudo thekraken -i
+       $ thekraken -i
        thekraken: The Kraken 0.4 (compiled Tue Apr 12 20:27:47 MDT 2011 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
@@ -323,7 +323,7 @@ Contents:
 
 11. Credits
 
-    Langouste was written and is maintained by Kris Rusocki <kszysiu@gmail.com>
+    The Kraken was written and is maintained by Kris Rusocki <kszysiu@gmail.com>
 
     Special thanks go to:
 

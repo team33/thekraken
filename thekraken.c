@@ -58,6 +58,7 @@ static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, NULL };
 extern char **environ;
 static int cpid;
 static FILE *logfp;
+static int logfd;
 
 static int debug_level;
 #define debug(_lev) if (debug_level >= _lev)
@@ -70,22 +71,30 @@ static char *k_getwd(void)
 	return getcwd(wdbuf, sizeof(wdbuf));
 }
 
+#define STR_BUF_SIZE 96
 static void sighandler(int n)
 {
-	fprintf(logfp, "thekraken: got signal 0x%08x\n", n);
+	char buf[STR_BUF_SIZE];
+
+	snprintf(buf, sizeof(buf), "thekraken: got signal 0x%08x\n", n);
+	write(logfd, buf, strlen(buf));
 	kill(cpid, n);
 }
+
+#define FN_BUF_SIZE 24
 
 static int autorestart_slot = -1;
 #define AUTORESTART_POLLING_INTERVAL 10
 static void sigalrmhandler(int n)
 {
-	char fn[24];
+	char fn[FN_BUF_SIZE];
+	char buf[STR_BUF_SIZE];
 	struct stat st;
 	
 	snprintf(fn, sizeof(fn), "work/wudata_%02u.ckp", autorestart_slot);
 	if (lstat(fn, &st) == 0 && time(NULL) - st.st_mtime >= 60) {
-		fprintf(logfp, "thekraken: autorestart: qualifying checkpoint identified, restarting.\n");
+		snprintf(buf, sizeof(buf), "thekraken: autorestart: qualifying checkpoint identified, restarting.\n");
+		write(logfd, buf, strlen(buf));
 		kill(cpid, SIGKILL);
 		return;
 	}
@@ -393,6 +402,7 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 	DIR *d;
 	struct dirent *de;
 	struct stat st;
+	int answered = 0;
 	
 	if (chdir(what)) {
 		goto out;
@@ -432,7 +442,7 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 			continue;
 		if (!S_ISDIR(st.st_mode))
 			continue;
-		if ((options & OPT_YES) == 0) {
+		if (!answered && (options & OPT_YES) == 0) {
 			char *wd = k_getwd();
 			int c;
 
@@ -443,8 +453,7 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 			} else {
 				fprintf(stderr, "thekraken: standard input is not a terminal, not descending into %s/%s or any other subdirectories\n", wd, de->d_name);
 			}
-			if ((options & OPT_YES) == 0)
-				break;
+			answered = 1;
 		}
 		if (options & OPT_YES)
 			traverse(de->d_name, how, options, counter, total);
@@ -611,12 +620,15 @@ int main(int ac, char **av)
 	if (logfp) {
 		setvbuf(logfp, NULL, _IONBF, 0);
 		fprintf(stderr, WELCOME_LINES, get_build_info());
+		fprintf(stderr, "thekraken: PID: %d\n", getpid());
 		fprintf(stderr, "thekraken: Logging to " LOGFN "\n");
 	} else {
 		/* fail silently */
 		logfp = stderr;
 	}
+	logfd = fileno(logfp);
 	fprintf(logfp, WELCOME_LINES, get_build_info());
+	fprintf(logfp, "thekraken: PID: %d\n", getpid());
 	
 	s = strrchr(av[0], '/');
 	if (s) {
@@ -642,7 +654,6 @@ int main(int ac, char **av)
 	signal(SIGHUP, sighandler);
 	signal(SIGTERM, sighandler);
 	signal(SIGINT, sighandler);
-	signal(SIGCHLD, SIG_IGN);
 	signal(SIGALRM, sigalrmhandler);
 
 	/* prep avclone early, need it for autorestart feature */
@@ -662,7 +673,7 @@ int main(int ac, char **av)
 
 		for (i = 0; i < 10; i++) {
 			struct stat st;
-			char fn[24];
+			char fn[FN_BUF_SIZE];
 
 			snprintf(fn, sizeof(fn), "work/wudata_%02u.dat", i);
 			if (lstat(fn, &st) == 0) {
@@ -700,10 +711,11 @@ int main(int ac, char **av)
 		long prv;
 		
 		prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
-		fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns with %ld (%s)\n", prv, strerror(errno));
-		if (prv != 0) {
+		if (prv == -1) {
+			fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns -1 (errno %d)\n", errno);
 			return -1;
 		}
+		fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns 0\n");
 		fprintf(logfp, "thekraken: child: Executing...\n");
 		execvp(nbin, avclone);
 		fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
@@ -717,15 +729,15 @@ int main(int ac, char **av)
 	}
 
 	while (1) {
-		status = 0;
 		rv = waitpid(-1, &status, __WALL);
-		fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x (errno %d)\n", rv, status, errno);
 		if (rv == -1) {
-			if (errno == EINTR || errno == ECHILD /* TODO: check kernel and see why we're getting this */) {
+			fprintf(logfp, "thekraken: waitpid() returns -1 (errno %d)\n", errno);
+			if (errno == EINTR) {
 				continue;
 			}
 			return -1;
 		}
+		fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x\n", rv, status);
 		if (WIFEXITED(status)) {
 			fprintf(logfp, "thekraken: %d: exited with %d\n", rv, WEXITSTATUS(status));
 			if (rv != cpid) {
@@ -736,7 +748,6 @@ int main(int ac, char **av)
 		}
 		if (WIFSIGNALED(status)) {
 			static int autorestart_done;
-			long prv;
 
 			/* signal sent by user to underlying FahCore */
 			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
@@ -754,16 +765,20 @@ int main(int ac, char **av)
 				nclones = 0;
 				lastcpu = 0;
 
-				prv = fork();
-				if (prv == 0) {
+				cpid = fork();
+				if (cpid == 0) {
+					long prv;
+					
 					prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
-					fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns with %ld (%s)\n", prv, strerror(errno));
 					if (prv == 0) {
+						fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns 0\n");
 						fprintf(logfp, "thekraken: child: Executing...\n");
 						execvp(nbin, avclone);
 						fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
+					} else {
+						fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns -1 (errno %d)\n", errno);
 					}
-				} else if (prv != -1) {
+				} else if (cpid != -1) {
 					autorestart_done = 1;
 					continue;
 				}
