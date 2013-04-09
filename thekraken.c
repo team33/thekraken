@@ -32,9 +32,10 @@
 
 #include <dirent.h>
 #include <sys/fsuid.h>
-#include <termios.h>
 
 #include <ctype.h>
+
+#include <time.h>
 
 #include "version.h"
 #include "build.h"
@@ -73,6 +74,22 @@ static void sighandler(int n)
 {
 	fprintf(logfp, "thekraken: got signal 0x%08x\n", n);
 	kill(cpid, n);
+}
+
+static int autorestart_slot = -1;
+#define AUTORESTART_POLLING_INTERVAL 10
+static void sigalrmhandler(int n)
+{
+	char fn[24];
+	struct stat st;
+	
+	snprintf(fn, sizeof(fn), "work/wudata_%02u.ckp", autorestart_slot);
+	if (lstat(fn, &st) == 0 && time(NULL) - st.st_mtime >= 60) {
+		fprintf(logfp, "thekraken: autorestart: qualifying checkpoint identified, restarting.\n");
+		kill(cpid, SIGKILL);
+		return;
+	}
+	alarm(AUTORESTART_POLLING_INTERVAL);
 }
 
 static int do_install(char *s)
@@ -236,16 +253,18 @@ static int list_uninstall(int options, int *counter, int *total)
 }
 
 #define CONF_NP 0
+#define CONF_AUTORESTART 1
 
 static char **conf_line;
 static int conf_index;
 static int conf_total;
 static int conf_step = 4;
 
-static char *conf_key[] = { "np" , NULL };
+static char *conf_key[] = { "np" , "autorestart", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
 static int conf_np = 0;
+static int conf_autorestart = 0;
 
 static void conf_line_add(char *s)
 {
@@ -327,6 +346,18 @@ static int conf_file_parse(char *fn)
 			fprintf(logfp, "thekraken: config: np=%d\n", conf_np);
 		}
 	}
+	
+	if (conf_val[CONF_AUTORESTART]) {
+		char *end;
+		
+		conf_autorestart = strtol(conf_val[CONF_AUTORESTART], &end, 10);
+		if (*end != '\0' || conf_autorestart < 0 || conf_autorestart > 1) {
+			fprintf(logfp, "thekraken: invalid value for 'autorestart', ignored\n");
+			conf_autorestart = 0;
+		} else {
+			fprintf(logfp, "thekraken: config: autorestart=%d\n", conf_autorestart);
+		}
+	}
 	return 0;
 }
 
@@ -402,11 +433,10 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 		if (!S_ISDIR(st.st_mode))
 			continue;
 		if ((options & OPT_YES) == 0) {
-			struct termios t;
 			char *wd = k_getwd();
 			int c;
 
-			if (!tcgetattr(0, &t)) {
+			if (isatty(0)) {
 				fprintf(stderr, "thekraken: descend into %s/%s and all other subdirectories [Y/n]? ", wd, de->d_name);
 				if ((c = getchar()) == 'y' || c == 'Y' || c == '\n')
 					options |= OPT_YES;
@@ -442,6 +472,9 @@ int main(int ac, char **av)
 	int nclones = 0;
 	int lastcpu = 0;
 	cpu_set_t cpuset;
+	
+	int i;
+	char **avclone;
 	
 	s = strrchr(av[0], '/');
 	if (!s) {
@@ -610,7 +643,54 @@ int main(int ac, char **av)
 	signal(SIGTERM, sighandler);
 	signal(SIGINT, sighandler);
 	signal(SIGCHLD, SIG_IGN);
-	
+	signal(SIGALRM, sigalrmhandler);
+
+	/* prep avclone early, need it for autorestart feature */
+	avclone = malloc((ac + 1) * sizeof(*avclone));
+	for (i = 0; i < ac; i++) {
+		avclone[i] = av[i];
+		if (conf_np && !strcmp(av[i], "-np")) {
+			avclone[i + 1] = conf_val[CONF_NP];
+			i++;
+		}
+	}
+	avclone[ac] = NULL;
+
+	/* autorestart: check if restart is necessary */
+	if (conf_autorestart) {
+		fprintf(logfp, "thekraken: autorestart: examining work directory...\n");
+
+		for (i = 0; i < 10; i++) {
+			struct stat st;
+			char fn[24];
+
+			snprintf(fn, sizeof(fn), "work/wudata_%02u.dat", i);
+			if (lstat(fn, &st) == 0) {
+				if (autorestart_slot != -1) {
+					fprintf(logfp, "thekraken: autorestart: WARNING: multiple WUs in work directory (%u, %u, ...), bailing\n", autorestart_slot, i);
+					conf_autorestart = 0;
+					break;
+				}
+				autorestart_slot = i;
+				snprintf(fn, sizeof(fn), "work/wudata_%02u.ckp", i);
+				if (lstat(fn, &st) == 0) {
+					fprintf(logfp, "thekraken: autorestart: unit %u already carries a checkpoint, bailing\n", i);
+					conf_autorestart = 0;
+					break;
+				}
+			}
+		}
+		
+		if (autorestart_slot == -1) {
+			fprintf(logfp, "thekraken: autorestart: WARNING: no WUs found, bailing\n");
+			conf_autorestart = 0;
+		}
+	}
+	fprintf(logfp, "thekraken: autorestart is %s\n", conf_autorestart ? "on" : "off");
+	if (conf_autorestart) {
+		fprintf(logfp, "thekraken: autorestart slot: %u\n", autorestart_slot);
+	}
+
 	cpid = fork();
 	if (cpid == -1) {
 		fprintf(logfp, "thekraken: fork: %s\n", strerror(errno));
@@ -618,8 +698,6 @@ int main(int ac, char **av)
 	}
 	if (cpid == 0) {
 		long prv;
-		char **avclone;
-		int i;
 		
 		prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
 		fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns with %ld (%s)\n", prv, strerror(errno));
@@ -627,30 +705,23 @@ int main(int ac, char **av)
 			return -1;
 		}
 		fprintf(logfp, "thekraken: child: Executing...\n");
-
-		avclone = malloc((ac + 1) * sizeof(*avclone));
-		for (i = 0; i < ac; i++) {
-			avclone[i] = av[i];
-			if (conf_np && !strcmp(av[i], "-np")) {
-				avclone[i + 1] = conf_val[CONF_NP];
-				i++;
-			}
-		}
-		avclone[ac] = NULL;
-
 		execvp(nbin, avclone);
 		fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
 		return -1;
 	}
 		
 	fprintf(logfp, "thekraken: Forked %d.\n", cpid);
+	
+	if (conf_autorestart) {
+		 alarm(AUTORESTART_POLLING_INTERVAL);
+	}
 
 	while (1) {
 		status = 0;
 		rv = waitpid(-1, &status, __WALL);
 		fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x (errno %d)\n", rv, status, errno);
 		if (rv == -1) {
-			if (errno == EINTR) {
+			if (errno == EINTR || errno == ECHILD /* TODO: check kernel and see why we're getting this */) {
 				continue;
 			}
 			return -1;
@@ -664,8 +735,39 @@ int main(int ac, char **av)
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
-			/* will never happen? */
+			static int autorestart_done;
+			long prv;
+
+			/* signal sent by user to underlying FahCore */
 			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
+			
+			/* autorestart */
+			if (WTERMSIG(status) == SIGKILL && conf_autorestart && !autorestart_done) {
+				nclones--;
+				if (nclones >= 0)
+					fprintf(logfp, "thekraken: autorestart enabled, %d thread(s) left\n", nclones);
+				if (nclones != -1)
+					continue;
+				fprintf(logfp, "thekraken: main process exited, autorestarting...\n");
+
+				/* restart state machine */
+				nclones = 0;
+				lastcpu = 0;
+
+				prv = fork();
+				if (prv == 0) {
+					prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
+					fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns with %ld (%s)\n", prv, strerror(errno));
+					if (prv == 0) {
+						fprintf(logfp, "thekraken: child: Executing...\n");
+						execvp(nbin, avclone);
+						fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
+					}
+				} else if (prv != -1) {
+					autorestart_done = 1;
+					continue;
+				}
+			}
 			raise(WTERMSIG(status));
 			return -1;
 		}
