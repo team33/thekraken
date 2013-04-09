@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011,2012 by Kris Rusocki <kszysiu@gmail.com>
+ * Copyright (C) 2012 by Stephen Gordon <firedfly@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -29,6 +30,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <linux/ptrace.h>
+#include <sys/syscall.h>
+#include <sys/user.h>
+#include <math.h>
 
 #include <dirent.h>
 #include <sys/fsuid.h>
@@ -58,6 +62,13 @@ static int cpid;
 static FILE *logfp;
 static int logfd;
 
+#define LOG_BUF_SIZE 1024
+#define LOG_FD 5
+static int tpid, tpid_log_insyscall, tpid_err_insyscall;
+static int *synload_pids = NULL;
+static int synload_duration = 8; // load duration in seconds
+static int synload_waitduration = 200;//wait between loads in ms
+
 static int debug_level;
 #define debug(_lev) if (debug_level >= _lev)
 
@@ -74,9 +85,16 @@ static void sighandler(int n)
 {
 	char buf[STR_BUF_SIZE];
 
-	snprintf(buf, sizeof(buf), "thekraken: got signal 0x%08x\n", n);
+	snprintf(buf, sizeof(buf), "thekraken (sighandler): %d got signal 0x%08x\n", getpid(), n);
 	write(logfd, buf, strlen(buf));
 	kill(cpid, n);
+}
+
+static void sigalrmhandler_synload(int n)
+{
+	/* alarm on a synthetic load process.  sleep for a bit, then begin the load again */
+	usleep(synload_waitduration * 1000);
+	alarm(synload_duration);
 }
 
 static int do_install(char *s)
@@ -441,6 +459,48 @@ out:
 	return;
 }
 
+char* getstr(pid_t child, long addr, int len) {
+	int i = 0;
+	char *str = malloc(sizeof(char) * (len + 1));
+	char *curstr = str;
+	union u {
+		long l;
+		char s[sizeof(long)];
+	} chunk;
+
+	while(i < len) {
+		int tocpy = len - i > sizeof(long) ? sizeof(long) : len - i;
+		chunk.l = ptrace(PTRACE_PEEKDATA, child, addr + i);
+		memcpy(curstr, chunk.s, tocpy);
+		curstr += tocpy; 
+		i += tocpy;
+	}
+	*curstr = '\0';
+	return str;
+}
+
+void synload()
+{
+	while (1)
+		sqrt(rand());
+}
+
+static void kill_synload()
+{
+	if(synload_pids == NULL)
+		return;
+
+	int *pid = synload_pids;
+	while(*pid > 0) {
+		fprintf(logfp, "thekraken: synload: sending SIGTERM to %d\n", *pid);
+		kill(*pid, SIGTERM);
+		pid++;
+	}
+
+	free(synload_pids);
+	synload_pids = NULL;
+}
+
 int main(int ac, char **av)
 {
 	char nbin[PATH_MAX];
@@ -454,7 +514,11 @@ int main(int ac, char **av)
 	int nclones = 0;
 	int last_used_cpu = 0;
 	cpu_set_t cpuset;
-	
+
+	/* setup the buffer to store data written to logfile_xx.txt */
+	char logbuf[LOG_BUF_SIZE];
+	char *logbufptr = logbuf;
+
 	s = strrchr(av[0], '/');
 	if (!s) {
 		s = av[0];
@@ -679,18 +743,24 @@ int main(int ac, char **av)
 			}
 			return -1;
 		}
-		fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x\n", rv, status);
+		if(rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
+			fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x\n", rv, status);
+
 		if (WIFEXITED(status)) {
 			fprintf(logfp, "thekraken: %d: exited with %d\n", rv, WEXITSTATUS(status));
 			if (rv != cpid) {
 				fprintf(logfp, "thekraken: %d: ignoring clone exit\n", rv);
 				continue;
 			}
+			kill_synload();
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
 			/* signal sent by user to underlying FahCore */
 			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
+
+			if (rv != cpid)
+				continue;
 			
 			raise(WTERMSIG(status));
 			return -1;
@@ -700,11 +770,19 @@ int main(int ac, char **av)
 			long prv;
 			//struct user_regs_struct regs; // stack examination?
 
-			fprintf(logfp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
+			if(rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
+				fprintf(logfp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
+
 			if (WSTOPSIG(status) == SIGTRAP) {
 				long cloned = -1;
 				e = status >> 16;
-				if (e & PTRACE_EVENT_CLONE) {
+
+				if (nclones == 0 && e == 0) {
+					/* initial attach */
+					fprintf(logfp, "thekraken: %d: initial attach\n", rv);
+					prv = ptrace(PTRACE_SETOPTIONS, rv, 0, PTRACE_O_TRACECLONE);
+				}
+				else if (e & PTRACE_EVENT_CLONE) {
 					int c;
 
 					prv = ptrace(PTRACE_GETEVENTMSG, rv, 0, &cloned);
@@ -718,13 +796,93 @@ int main(int ac, char **av)
 						last_used_cpu++;
 						sched_setaffinity(c, sizeof(cpuset), &cpuset);
 					}
-				} else if (e == 0) {
-					/* initial attach? */
-					fprintf(logfp, "thekraken: %d: initial attach\n", rv);
-					prv = ptrace(PTRACE_SETOPTIONS, rv, 0, PTRACE_O_TRACECLONE);
+					if (nclones == 1) {
+						fprintf(logfp, "thekraken: %d: talkative FahCore process; listening to syscalls\n", c);
+						tpid = c;
+					}
+				} else if (rv == tpid) {
+					/* this is the talkative fah process. Check for data written to stderr or the logfile (fd 5) */
+					struct user_regs_struct regs;
+					ptrace(PTRACE_GETREGS, rv, NULL, &regs);
+					long call = regs.orig_rax;
+					long fd = regs.rdi;
+					long msgaddr = regs.rsi;
+					long msglen = regs.rdx;
+
+					if (call == SYS_write && fd == LOG_FD) {
+						if (!tpid_log_insyscall) {
+							tpid_log_insyscall = 1;
+							char *str = getstr(rv, msgaddr, msglen);
+							memcpy(logbufptr, str, msglen);
+							free(str);
+							logbufptr += msglen;
+							*logbufptr = '\0';
+							if(strchr(logbuf, '\n') != NULL) {
+								if(strstr(logbuf, "Completed ") != NULL && strstr(logbuf, "out of") != NULL) {
+									fprintf(logfp, "thekraken: %d: first step identified; initiating synthetic load.\n", rv);
+
+									/* generate new synthetic load processes */
+									int synload_threads = (nclones - 2) / 2;
+									synload_pids = malloc(sizeof(int) * (synload_threads + 1));
+									int *curpid = synload_pids;
+									last_used_cpu = conf_startcpu + 1;
+									for(; synload_threads > 0; synload_threads--) {
+										int pid = fork();
+										if(pid == -1) {
+											fprintf(logfp, "thekraken: synload fork: %s\n", strerror(errno));
+											return -1;
+										} else if(pid == 0) {
+											/* reset signals on the child and setup our own alarm */
+											signal(SIGHUP, SIG_DFL);
+											signal(SIGTERM, SIG_DFL);
+											signal(SIGINT, SIG_DFL);
+											signal(SIGALRM, sigalrmhandler_synload);
+
+											alarm(synload_duration);
+											synload();
+										} else {
+											*curpid = pid;
+											curpid++;
+
+											fprintf(logfp, "thekraken: synload: %d: synthetic load (%d)thread created.  load %ds; wait %dms\n", getpid(), pid, synload_duration, synload_waitduration);
+											/* set affinity on the new load process */
+											CPU_ZERO(&cpuset);
+											CPU_SET(last_used_cpu, &cpuset);
+											sched_setaffinity(pid, sizeof(cpuset), &cpuset);
+											last_used_cpu += 2;
+										}
+									}
+									*curpid = -1;
+								}
+								logbufptr = logbuf;
+							}
+						} else {
+							tpid_log_insyscall = 0;
+						}
+					} else if (call == SYS_write && fd == STDERR_FILENO) {
+						if (!tpid_err_insyscall) {
+							tpid_err_insyscall = 1;
+							char *str = getstr(rv, msgaddr, msglen);
+							if(strstr(str, "Turning on dynamic load balancing") != NULL) {
+								fprintf(logfp, "thekraken: synload: DLB has engaged; killing synthetic load\n");
+								kill_synload();
+								tpid = -1; // don't monitor the talkative thread anymore
+							}
+							free(str);
+						} else {
+							tpid_err_insyscall = 0;
+						}
+					}
 				}
-				fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
-				prv = ptrace(PTRACE_CONT, rv, 0, 0);
+
+				if (rv == tpid) {
+					/* talkative FahCore process; notify us of the next syscall entry/exit */
+					prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
+				}
+				else {
+					fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
+					prv = ptrace(PTRACE_CONT, rv, 0, 0);
+				}
 				continue;
 			}
 			if (WSTOPSIG(status) == SIGSTOP) {
