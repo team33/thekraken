@@ -30,19 +30,25 @@
 #include <sys/stat.h>
 #include <linux/ptrace.h>
 
+#include <dirent.h>
+
 #define WELCOME_LINES "thekraken: The Kraken 0.3\nthekraken: Processor affinity wrapper for Folding@Home\nthekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\n"
-#define CA5_ROOT "FahCore_a5"
-#define CA3_ROOT "FahCore_a3"
+#define CA5_SHORT "FahCore_a5"
+#define CA3_SHORT "FahCore_a3"
 #define CA5 "FahCore_a5.exe"
 #define CA3 "FahCore_a3.exe"
-#define SUFFIX ".exe"
 #define SIZE_THRESH 204800
 #define LOGFN "thekraken.log"
 #define LOGFN_PREV "thekraken-prev.log"
 
+static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, NULL };
+
 extern char **environ;
 static int cpid;
 static FILE *fp;
+
+static int debug_level;
+#define debug(_lev) if (debug_level >= _lev)
 
 static void sighandler(int n)
 {
@@ -104,7 +110,7 @@ static void install_summary(char *s, int rv)
 {
 	switch (rv) {
 		case -1:
-			fprintf(stderr, "thekraken: %s not found, skipping\n", s);
+			debug(1) fprintf(stderr, "thekraken: %s not found, skipping\n", s);
 			break;
 		case 0:
 			fprintf(stderr, "thekraken: %s: wrapper succesfully installed\n", s);
@@ -115,6 +121,21 @@ static void install_summary(char *s, int rv)
 		default:
 			fprintf(stderr, "thekraken: %s: problems occurred during installation, no installation performed (code %d)\n", s, rv);
 	}
+}
+
+static int list_install(void)
+{
+	int ret = 0;
+	char **s = core_list;
+	int rv;
+	
+	while (*s) {
+		if (!(rv = install(*s)))
+			ret++;
+		install_summary(*s, rv);
+		s++;
+	}
+	return ret;
 }
 
 static int uninstall(char *s)
@@ -141,11 +162,76 @@ static void uninstall_summary(char *s, int rv)
 			fprintf(stderr, "thekraken: %s: wrapper succesfully uninstalled\n", s);
 			break;
 		case 1:
-			fprintf(stderr, "thekraken: %s: wrapper not installed; nothing to uninstall\n", s);
+			debug(1) fprintf(stderr, "thekraken: %s: wrapper not installed; nothing to uninstall\n", s);
 			break;
 		default:
 			fprintf(stderr, "thekraken: %s: problems occurred during uninstallation, no uninstallation performed (code %d)\n", s, rv);
 	}
+}
+
+static int list_uninstall(void)
+{
+	int ret = 0;
+	char **s = core_list;
+	int rv;
+	
+	while (*s) {
+		if (!(rv = uninstall(*s)))
+			ret++;
+		uninstall_summary(*s, rv);
+		s++;
+	}
+	return ret;
+}
+
+static void traverse(char *root, char *what, int how, int options, int *counter)
+{
+	DIR *d;
+	struct dirent *de;
+	char *rroot = root;
+	
+	if (chdir(what)) {
+		goto out;
+	}
+	if (root == NULL) {
+		rroot = get_current_dir_name();
+		if (!rroot)
+			goto out;
+	}
+	debug(1) fprintf(stderr, "thekraken: entered %s\n", what);
+	if (!how) {
+		(*counter) += list_install();
+	} else {
+		(*counter) += list_uninstall();
+	}
+	d = opendir(".");
+	if (!d) {
+		goto out_up;
+	}
+	while ((de = readdir(d))) {
+		if (!strcmp(de->d_name, "."))
+			continue;
+		if (!strcmp(de->d_name, ".."))
+			continue;
+		if (!strcmp(de->d_name, "work"))
+			continue;
+		traverse(rroot, de->d_name, how, options, counter);
+	}
+	closedir(d);
+out_up:
+	debug(1) fprintf(stderr, "thekraken: leaving %s\n", what);
+	if (root != NULL) {
+		char * s;
+
+		chdir("..");
+		s = get_current_dir_name();
+		debug(2) fprintf(stderr, "thekraken: root: %s, now: %s\n", root, s);
+		free(s);
+	} else {
+		free(rroot);
+	}
+out:
+	return;
 }
 
 int main(int ac, char **av)
@@ -166,10 +252,11 @@ int main(int ac, char **av)
 		int c; 
 		int opt_install = 0, opt_uninstall = 0, opt_help = 0, opt_yes = 0;
 		char *path = NULL;
+		int counter = 0;
 		
 		fprintf(stderr, WELCOME_LINES);
 		opterr = 0;
-		while ((c = getopt(ac, av, "+iuhy")) != -1) {
+		while ((c = getopt(ac, av, "+iuhyv")) != -1) {
 			switch (c) {
 				case 'i':
 					opt_install = 1;
@@ -182,6 +269,9 @@ int main(int ac, char **av)
 					break;
 				case 'y':
 					opt_yes = 1;
+					break;
+				case 'v':
+					debug_level++;
 					break;
 				case '?':
 					fprintf(stderr, "thekraken: error: option not recognized: -%c\n", optopt);
@@ -217,6 +307,7 @@ int main(int ac, char **av)
 			fprintf(stderr, "\t-u [path]\tuninstall The Kraken from 'path' directory and all its\n");
 			fprintf(stderr, "\t\t\tsubdirectories; if path is omitted, current directory\n");
 			fprintf(stderr, "\t\t\tis used\n");
+			fprintf(stderr, "\t-v\t\tincrease verbosity; can be specified multiple times\n");
 			fprintf(stderr, "\t-y\t\tdo not ask for confirmation (non-interactive mode)\n");
 			fprintf(stderr, "\t-h\t\tdisplay this help and exit\n");
 			return 0;
@@ -233,26 +324,26 @@ int main(int ac, char **av)
 		}
 		if (opt_install) {
 			fprintf(stderr, "thekraken: performing installation to %s\n", path);
-			rv = traverse(path, 0, opt_yes);
+			traverse(NULL, path, 0, opt_yes, &counter);
 #if 0
 			rv = install(CA5);
 			install_summary(CA5, rv);
 			rv = install(CA3);
 			install_summary(CA3, rv);
 #endif
-			fprintf(stderr, "thekraken: finished installation, %d files processed\n", rv);
+			fprintf(stderr, "thekraken: finished installation, %d files processed\n", counter);
 			return 0;
 		}
 		if (opt_uninstall) {
 			fprintf(stderr, "thekraken: performing uninstallation from %s\n", path);
-			rv = traverse(path, 1, opt_yes);
+			traverse(NULL, path, 1, opt_yes, &counter);
 #if 0
 			rv = uninstall(CA5);
 			uninstall_summary(CA5, rv);
 			rv = uninstall(CA3);
 			uninstall_summary(CA3, rv);
 #endif
-			fprintf(stderr, "thekraken: finished uninstallation, %d files processed\n", rv);
+			fprintf(stderr, "thekraken: finished uninstallation, %d files processed\n", counter);
 			return 0;
 		}
 
