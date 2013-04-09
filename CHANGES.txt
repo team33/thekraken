@@ -1,3 +1,10 @@
+2012-06-15 -- Prerelease (thekraken-0.7-pre15)
+-- convert startup deadline to only warn the user
+   of bad WU instead of killing FahCore
+-- make sure that dlbload gets started only once
+   (could manifest with <5 min./frame WUs)
+
+
 2012-06-05 -- Prerelease (thekraken-0.7-pre14)
 -- support FahCore_a4
 -- V7: unblock appropriate signals so dlbload

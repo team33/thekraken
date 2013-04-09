@@ -92,9 +92,15 @@ static void sigalrmhandler(int n)
 {
 	char buf[STR_BUF_SIZE];
 
-	llogp(logfd, buf, sizeof(buf), "thekraken: %d: (sigalrmhandler) reached startup deadline, killing FahCore\n", getpid());
+	llogp(logfd, buf, sizeof(buf), "thekraken: %d: (sigalrmhandler) reached startup deadline\n", getpid());
 	write(logfd, buf, strlen(buf));
-	kill(cpid, SIGKILL);
+	llogp(STDERR_FILENO, buf, sizeof(buf), "thekraken: WARNING: looks like current WU failed to start\n");
+	write(STDERR_FILENO, buf, strlen(buf));
+	llogp(STDERR_FILENO, buf, sizeof(buf), "thekraken: please stop the client, delete machinedependent.dat, queue.dat and work/ directory,\n");
+	write(STDERR_FILENO, buf, strlen(buf));
+	llogp(STDERR_FILENO, buf, sizeof(buf), "thekraken: then restart the client\n");
+	write(STDERR_FILENO, buf, strlen(buf));
+	//kill(cpid, SIGKILL);
 }
 
 static int do_wrap(char *s)
@@ -623,7 +629,9 @@ int main(int ac, char **av)
 	time_t synthload_start_time = 0;
 
 	int shutdown = 0;
-	
+
+	int first_step = 0;
+
 	logfp = stderr;
 
 	s = strrchr(av[0], '/');
@@ -975,8 +983,9 @@ int main(int ac, char **av)
 							tpid_insyscall = 1;
 							getstr(rv, msgaddr, msglen, fahcore_logbuf, &fahcore_logbufpos, sizeof(fahcore_logbuf));
 							if (strchr(fahcore_logbuf, '\n') != NULL) {
-								if (strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
+								if (first_step == 0 && strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
 									llog("thekraken: %d: first step identified\n", rv);
+									first_step = 1;
 									if (conf_dlbload) {
 										int dlbload_workers = (nclones - 2) / 2;
 
