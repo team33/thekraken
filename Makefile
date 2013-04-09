@@ -17,7 +17,7 @@ GENERATED=thekraken.cfg thekraken.log thekraken-prev.log .thekraken-timeref
 
 all: $(OBJDIR) $(PROJECT)
 
-install: $(PROJECT)
+install:
 	install -ps $(PROJECT) $(PREFIX)/bin
 
 uninstall:

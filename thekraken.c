@@ -298,6 +298,7 @@ static int list_uninstall(int options, int *counter, int *total)
 #define CONF_NP 0           // override number of processors
 #define CONF_AUTORESTART 1  // restart the client after the first checkpoint is written
 #define CONF_STARTCPU 2     // bind the FahCore processes starting with this cpu
+#define CONF_MAX 3
 
 static char **conf_line;
 static int conf_index;
@@ -320,6 +321,55 @@ static void conf_line_add(char *s)
 	conf_line[conf_index++] = s;
 }
 
+static int conf_validate_one(int n)
+{
+	int ret = 0;
+
+	if (n == CONF_NP && conf_val[CONF_NP]) {
+		char *end;
+
+		conf_np = strtol(conf_val[CONF_NP], &end, 10);
+		if (*end != '\0' || conf_np < 2 || conf_np > 128) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_NP], conf_val[CONF_NP]);
+			ret = 1;
+			conf_np = 0;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_NP], conf_np);
+		}
+		return ret;
+	}
+	
+	if (n == CONF_AUTORESTART && conf_val[CONF_AUTORESTART]) {
+		char *end;
+		
+		conf_autorestart = strtol(conf_val[CONF_AUTORESTART], &end, 10);
+		if (*end != '\0' || conf_autorestart < 0 || conf_autorestart > 1) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_AUTORESTART], conf_val[CONF_AUTORESTART]);
+			ret = 1;
+			conf_autorestart = 0;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_AUTORESTART], conf_autorestart);
+		}
+		return ret;
+	}
+
+	if (n == CONF_STARTCPU && conf_val[CONF_STARTCPU]) {
+		char *end;
+		
+		conf_startcpu = strtol(conf_val[CONF_STARTCPU], &end, 10);
+		if (*end != '\0' || conf_startcpu < 0 || conf_startcpu > 128) {
+			fprintf(logfp, "thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_STARTCPU], conf_val[CONF_STARTCPU]);
+			ret = 1;
+			conf_startcpu = 0;
+		} else {
+			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_STARTCPU], conf_startcpu);
+		}
+		return ret;
+	}
+
+	return 2;
+}
+
 /* TODO: fscanf? */
 static int conf_line_parse(char *s)
 {
@@ -330,11 +380,11 @@ static int conf_line_parse(char *s)
 	
 	e = strchr(s, '=');
 	if (!e) {
-		return 1;
+		return -1;
 	}
 	klen = e - s;
 	if (klen >= sizeof(key)) {
-		return 2;
+		return -2;
 	}
 	memcpy(key, s, klen);
 	key[klen] = '\0';
@@ -355,13 +405,12 @@ static int conf_line_parse(char *s)
 			conf_val[i] = malloc(vlen + 1);
 			memcpy(conf_val[i], e + 1, vlen);
 			conf_val[i][vlen] = '\0';
-			break;
+			if (conf_validate_one(i))
+				return -4;
+			return 0;
 		}
 	}
-	if (!conf_key[i]) {
-		fprintf(logfp, "thekraken: WARNING: unknown configuration variable '%s'\n", key);
-	}
-	return 0;
+	return -3;
 }
 
 static int conf_file_parse(char *fn)
@@ -378,42 +427,7 @@ static int conf_file_parse(char *fn)
 		conf_line_parse(buf);
 	}
 	fclose(fp);
-
-	if (conf_val[CONF_NP]) {
-		char *end;
-
-		conf_np = strtol(conf_val[CONF_NP], &end, 10);
-		if (*end != '\0' || conf_np < 2 || conf_np > 32) {
-			fprintf(logfp, "thekraken: invalid value for '%s', ignored\n", conf_key[CONF_NP]);
-			conf_np = 0;
-		} else {
-			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_NP], conf_np);
-		}
-	}
 	
-	if (conf_val[CONF_AUTORESTART]) {
-		char *end;
-		
-		conf_autorestart = strtol(conf_val[CONF_AUTORESTART], &end, 10);
-		if (*end != '\0' || conf_autorestart < 0) {
-			fprintf(logfp, "thekraken: invalid value for '%s', ignored\n", conf_key[CONF_AUTORESTART]);
-			conf_autorestart = 0;
-		} else {
-			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_AUTORESTART], conf_autorestart);
-		}
-	}
-
-	if (conf_val[CONF_STARTCPU]) {
-		char *end;
-		
-		conf_startcpu = strtol(conf_val[CONF_STARTCPU], &end, 10);
-		if (*end != '\0' || conf_startcpu < 0) {
-			fprintf(logfp, "thekraken: invalid value for '%s', ignored\n", conf_key[CONF_STARTCPU]);
-			conf_startcpu = 0;
-		} else {
-			fprintf(logfp, "thekraken: config: %s=%d\n", conf_key[CONF_STARTCPU], conf_startcpu);
-		}
-	}
 	return 0;
 }
 
@@ -524,12 +538,14 @@ int main(int ac, char **av)
 	int status;
 
 	int nclones = 0;
-	int last_used_cpu = 0;
+	int next_cpu = 0;
 	cpu_set_t cpuset;
 	
 	int i;
 	char **avclone;
 	
+	pid_t last_pid = -1;
+
 	s = strrchr(av[0], '/');
 	if (!s) {
 		s = av[0];
@@ -576,7 +592,18 @@ int main(int ac, char **av)
 				case 'c':
 					custom_config = 1;
 					conf_line_add(av[optind - 1]);
-					conf_line_parse(av[optind -1]);
+					rv = conf_line_parse(av[optind -1]);
+					switch (rv) {
+						case -1:
+						case -2:
+							fprintf(stderr, "thekraken: invalid configuration variable: '%s'\n", av[optind - 1]);
+							break;
+						case -3:
+							fprintf(stderr, "thekraken: unknown configuration variable in '%s'\n", av[optind - 1]);
+							break;
+					}
+					if (rv < 0)
+						return -1;
 					break;
 				case '?':
 					if (optopt != 'c')
@@ -708,8 +735,8 @@ int main(int ac, char **av)
 	signal(SIGINT, sighandler);
 	signal(SIGALRM, sigalrmhandler);
 
-	/* set the last_used_cpu to the config setting (default: 0) */
-	last_used_cpu = conf_startcpu;
+	/* set the next_cpu to the config setting (default: 0) */
+	next_cpu = conf_startcpu;
 
 	/* prep avclone early, need it for autorestart feature */
 	avclone = malloc((ac + 1) * sizeof(*avclone));
@@ -827,7 +854,7 @@ int main(int ac, char **av)
 
 				/* restart state machine */
 				nclones = 0;
-				last_used_cpu = conf_startcpu;
+				next_cpu = conf_startcpu;
 
 				cpid = fork();
 				if (cpid == 0) {
@@ -868,11 +895,18 @@ int main(int ac, char **av)
 					fprintf(logfp, "thekraken: %d: cloned %d\n", rv, c);
 					nclones++;
 					if (nclones != 2 && nclones != 3) {
-						fprintf(logfp, "thekraken: %d: binding to cpu %d\n", c, last_used_cpu);
+						if (last_pid != -1) {
+							fprintf(logfp, "thekraken: [workaround for broken kernels] %d: binding to cpu %d\n", last_pid, next_cpu - 1);
+							CPU_ZERO(&cpuset);
+							CPU_SET(next_cpu - 1, &cpuset);
+							sched_setaffinity(last_pid, sizeof(cpuset), &cpuset);
+						}
+						fprintf(logfp, "thekraken: %d: binding to cpu %d\n", c, next_cpu);
 						CPU_ZERO(&cpuset);
-						CPU_SET(last_used_cpu, &cpuset);
-						last_used_cpu++;
+						CPU_SET(next_cpu, &cpuset);
+						next_cpu++;
 						sched_setaffinity(c, sizeof(cpuset), &cpuset);
+						last_pid = c;
 					}
 				} else if (e == 0) {
 					/* initial attach? */
