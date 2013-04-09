@@ -26,8 +26,16 @@
 #include <stdlib.h>
 #include <sys/user.h>
 #include <sched.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <linux/ptrace.h>
 
-#define WELCOME_LINES "thekraken: The Kraken 0.1\nthekraken: Processor affinity wrapper for Folding@Home\nthekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\nthekraken: Logging to thekraken.log\n"
+#define WELCOME_LINES "thekraken: The Kraken 0.2\nthekraken: Processor affinity wrapper for Folding@Home\nthekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\n"
+#define CA5 "FahCore_a5.exe"
+#define CA3 "FahCore_a3.exe"
+#define SIZE_THRESH 204800
+#define LOGFN "thekraken.log"
+#define LOGFN_PREV "thekraken-prev.log"
 
 extern char **environ;
 static int cpid;
@@ -37,6 +45,104 @@ static void sighandler(int n)
 {
 	fprintf(fp, "thekraken: got signal 0x%08x\n", n);
 	kill(cpid, n);
+}
+
+static int do_install(char *s)
+{
+	int fd1, fd2;
+	char buf[8192];
+	int rv, rv2;;
+	
+	fd1 = open("/proc/self/exe", O_RDONLY);
+	fd2 = open(s, O_WRONLY|O_TRUNC|O_CREAT, S_IRWXU|S_IRWXG|S_IRWXO);
+	if (fd1 == -1 || fd2 == -1)
+		goto out_err;
+	while ((rv = read(fd1, buf, sizeof(buf))) > 0) {
+		rv2 = write(fd2, buf, rv);
+		if (rv2 != rv)
+			goto out_err;
+	}
+	close(fd1);
+	close(fd2);
+	
+	return 0;
+out_err:
+	close(fd1);
+	close(fd2);
+	return -1;
+}
+
+static int install(char *s)
+{
+	struct stat st;
+	char fn[32];
+	
+	if (lstat(s, &st)) {
+		return -1;
+	}
+	if (!S_ISREG(st.st_mode)) {
+		return -1;
+	}
+	if (st.st_size < SIZE_THRESH) {
+		return 1; // already installed
+	}
+	sprintf(fn, "thekraken-%s", s);
+	if (rename(s, fn)) {
+		return 2; // problems, no installation performed
+	}
+	if (do_install(s)) {
+		rename(fn, s);
+		return 3; // problems, no installation performed
+	}
+	return 0;
+}
+
+static void install_summary(char *s, int rv)
+{
+	switch (rv) {
+		case -1:
+			fprintf(stderr, "thekraken: %s not found, skipping\n", s);
+			break;
+		case 0:
+			fprintf(stderr, "thekraken: %s: wrapper succesfully installed\n", s);
+			break;
+		case 1:
+			fprintf(stderr, "thekraken: %s: wrapper already installed, no installation performed\n", s);
+			break;
+		default:
+			fprintf(stderr, "thekraken: %s: problems occurred during installation, no installation performed (code %d)\n", s, rv);
+	}
+}
+
+static int uninstall(char *s)
+{	
+	char fn[32];
+	struct stat st;
+	int rv;
+	
+	sprintf(fn, "thekraken-%s", s);
+	
+	rv = lstat(fn, &st);
+	if (rv == -1) {
+		if (errno == ENOENT)
+			return 1;
+		return -1;
+	}
+	return rename(fn, s);
+}
+
+static void uninstall_summary(char *s, int rv)
+{
+	switch (rv) {
+		case 0:
+			fprintf(stderr, "thekraken: %s: wrapper succesfully uninstalled\n", s);
+			break;
+		case 1:
+			fprintf(stderr, "thekraken: %s: wrapper not installed; nothing to uninstall\n", s);
+			break;
+		default:
+			fprintf(stderr, "thekraken: %s: problems occurred during uninstallation, no installation performed (code %d)\n", s, rv);
+	}
 }
 
 int main(int ac, char **av)
@@ -53,11 +159,43 @@ int main(int ac, char **av)
 	int lastcpu = 0;
 	cpu_set_t cpuset;
 
-	
-	fp = fopen("thekraken.log", "w");
+	if (strstr(av[0], "thekraken")) {
+		fprintf(stderr, WELCOME_LINES);
+		if (!av[1]) {
+			fprintf(stderr, "thekraken: to install run `%s -i', to uninstall run `%s -u'\n", av[0], av[0]);
+			return 0;
+		}
+		if (!strcmp("-i", av[1])) {
+			fprintf(stderr, "thekraken: performing installation\n");
+			rv = install(CA5);
+			install_summary(CA5, rv);
+			rv = install(CA3);
+			install_summary(CA3, rv);
+			fprintf(stderr, "thekraken: finished installation\n");
+			return 0;
+		}
+		if (!strcmp("-u", av[1])) {
+			fprintf(stderr, "thekraken: performing uninstallation\n");
+			rv = uninstall(CA5);
+			uninstall_summary(CA5, rv);
+			rv = uninstall(CA3);
+			uninstall_summary(CA3, rv);
+			fprintf(stderr, "thekraken: finished uninstallation\n");
+			return 0;
+		}
+		fprintf(stderr, "thekraken: unknown option: %s\n", av[1]);
+		return -1;
+	}
+
+	rename(LOGFN, LOGFN_PREV);
+	fp = fopen(LOGFN, "w");
 	if (fp) {
 		setvbuf(fp, NULL, _IONBF, 0);
 		fprintf(stderr, WELCOME_LINES);
+		fprintf(stderr, "thekraken: Logging to " LOGFN "\n");
+	} else {
+		/* fail silently */
+		fp = stderr;
 	}
 	fprintf(fp, WELCOME_LINES);
 	
@@ -71,7 +209,7 @@ int main(int ac, char **av)
 	}
 	t += len;
 	nbin[sizeof(nbin) - 1] = '\0';
-	snprintf(t, sizeof(nbin) - len - 1, "darkswarm.org-%s", s);
+	snprintf(t, sizeof(nbin) - len - 1, "thekraken-%s", s);
 	fprintf(fp, "thekraken: Launch binary: %s\n", nbin);
 
 	signal(SIGHUP, sighandler);
