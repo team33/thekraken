@@ -1,4 +1,4 @@
-2012-05-20 -- Prerelease (thekraken-0.7-pre8)
+2012-05-20 -- Prerelease (thekraken-0.7-pre9)
 -- incorporate novel approach to making FahCores engage
    Dynamic Load Balancing (Stephen Gordon)
 -- autorestart DLB triggering method is no longer viable,

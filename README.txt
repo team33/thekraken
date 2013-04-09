@@ -384,6 +384,6 @@ Contents:
         musky at [H]ardForum -- alternative method for installation
                                 confirmation
 
-	firedfly at [H]ardForum -- help with troubleshooting
+        firedfly at [H]ardForum -- help with troubleshooting
                                    client-on-remote-filesystem-with-off-clock
                                    issue
