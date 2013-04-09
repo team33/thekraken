@@ -5,15 +5,22 @@ Contents:
 1. What does The Kraken do?
 2. How is The Kraken useful?
 3. Supported configurations (PLEASE READ!)
-4. Building The Kraken
-4.1. Pre-requisites
-4.2. Building
-5. Installation
-5.1. V6 client
-5.2. V7 client
-6. How do I know it's working?
-7. Known issues and caveats
-8. Support
+4. Upgrade recommendations
+4.1. Upgrade recommendations: The Kraken 0.2
+4.2. Upgrade recommendations: The Kraken 0.3
+5. Building The Kraken
+5.1. Pre-requisites
+5.2. Building
+6. Installation
+6.1. Installation: V6 client
+6.2. Installation: V7 client
+6.3. Installation: V7 client with thread number override (bigadv WUs
+     on 6-core processors)
+7. Uninstallation
+8. How do I know it's working?
+9. Known issues and caveats
+10. Support
+11. Credits
 
 
 
@@ -56,9 +63,55 @@ Contents:
   are not supported at this time.
 
 
-4. Building The Kraken
 
-4.1. Pre-requisites
+4. Upgrade recommendations
+
+4.1. Upgrade recommendations: The Kraken 0.2
+
+    It is recommended to uninstall and remove The Kraken for the sake
+    of housekeeping.
+
+    1. Stop the client
+    2. Go to client directory
+    3. Run "./thekraken-0.2 -u"; it should give output similar to this one:
+
+    $ ./thekraken-0.2 -u
+    thekraken: The Kraken 0.2
+    thekraken: Processor affinity wrapper for Folding@Home
+    thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
+    thekraken: performing uninstallation
+    thekraken: FahCore_a5.exe: wrapper succesfully uninstalled
+    thekraken: FahCore_a3.exe: wrapper succesfully uninstalled
+    thekraken: finished uninstallation
+    $ 
+
+    4. Run "rm -f thekraken-0.2*"
+    5. Follow instructions in 6.1, 6.2 or 6.3, depending on configuration.
+
+
+
+4.2. Upgrade recommendations: The Kraken 0.3
+
+    It is recommended to uninstall and remove The Kraken from the system
+    for the sake of housekeeping.
+
+    If you downloaded and installed The Kraken 0.3 (which wasn't very
+    fortunate release), there are two recommended action items --
+    uninstalling wrapper component from client directory and removing
+    The Kraken from /usr/local/bin.
+
+    1. Stop the client
+    2. Run (as root) "/usr/local/bin/thekraken -yu /var/lib/fahclient";
+       on Ubuntu prepend the line with "sudo".
+    3. Run (as root) "rm -f /usr/local/bin/thekraken"; on Ubuntu
+       prepend the line with "sudo".
+    4. Follow instructions in 6.1, 6.2 or 6.3, depending on configuration.
+
+
+
+5. Building The Kraken
+
+5.1. Pre-requisites
 
     1. Make sure that (where appropriate)
        - NUMA is enabled,
@@ -74,76 +127,121 @@ Contents:
 
 
 
-4.2. Building
+5.2. Building
 
     1. Run "make"
-    2. Run "sudo make install" (or call "make install" as root)
+    2. Run "sudo make install" (or run "make install" as root)
     
     Voila. The Kraken is available in /usr/bin.
 
 
 
-5. Installation
+6. Installation
 
-5.1. V6 client
+6.1. Installation: V6 client
 
-    Stop the client. Then go to client directory and run:
+    1. Stop the client
+    2. Go to client directory and run:
 
-      thekraken -i
+       thekraken -i
 
-    Doing so should result in something along the following:
+       Doing so should result in something along the following:
 
-    $ thekraken -i
-    thekraken: The Kraken 0.3 (compiled Sat Apr  2 11:38:47 MDT 2011 by fah@tentacle)
-    thekraken: Processor affinity wrapper for Folding@Home
-    thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
-    thekraken: performing installation to .
-    thekraken: /home/fah/fah-6.34/FahCore_a3.exe: wrapper succesfully installed
-    thekraken: /home/fah/fah-6.34/FahCore_a5.exe: wrapper succesfully installed
-    thekraken: finished installation, 2 out of 2 files processed
-    $ 
+       $ sudo thekraken -i
+       thekraken: The Kraken 0.4 (compiled Tue Apr 12 20:27:47 MDT 2011 by fah@tentacle)
+       thekraken: Processor affinity wrapper for Folding@Home
+       thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
+       thekraken: performing installation to .
+       thekraken: /home/fah/fah-6.34/FahCore_a3.exe: wrapper succesfully installed
+       thekraken: /home/fah/fah-6.34/FahCore_a5.exe: wrapper succesfully installed
+       thekraken: finished installation, 2 out of 2 files processed
+       $ 
 
-    Re-start the client.
-
-
-
-5.2. V7 client
-
-    Stop the client. Run:
-
-      sudo thekraken -i /var/lib/fahclient/cores
-
-    Alternatively, run "thekraken -i /var/lib/fahclient/cores" as root.
-
-    Doing so should result in something along the following:
-
-    $ sudo thekraken -i /var/lib/fahclient/cores/
-    thekraken: The Kraken 0.3 (compiled Sat Apr  2 11:38:47 MDT 2011 by fah@tentacle)
-    thekraken: Processor affinity wrapper for Folding@Home
-    thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
-    thekraken: performing installation to /var/lib/fahclient/cores/
-    thekraken: descend into /var/lib/fahclient/cores/www.stanford.edu and all other subdirectories [Y/n]?
-
-    If path appears correct, confirm with "y" and press Enter. This should result
-    in something along the following:
-    
-    thekraken: /var/lib/fahclient/cores/www.stanford.edu/~pande/Linux/AMD64/Core_a3.fah/FahCore_a3: wrapper succesfully installed
-    thekraken: /var/lib/fahclient/cores/www.stanford.edu/~pande/Linux/AMD64/beta/Core_a3.fah/FahCore_a3: wrapper succesfully installed
-    thekraken: finished installation, 2 out of 2 files processed
-    $ 
-
-    Re-start the client.
+    3. Re-start the client.
 
 
 
-6. How do I know it's working?
+6.2. Installation: V7 client
+
+    As single V7 client installation may be run off more than one "home"
+    directory, the installation process is little more complicated.
+    It is imperative client's home directory is determined prior to
+    installation of The Kraken.
+
+    1. Make sure the client is running (and folding)
+    2. Determine client's "home" directory; run (as root; on Ubuntu prepend
+       with "sudo"):
+
+       stat /proc/$(ps auxw | awk '/FahCo[^[]/ { print $2 ; exit }' )/exe | head -1 | cut -f 3 -d \`  | sed s=cores.*\$=cores/=
+
+       It should return path, such as: "/var/lib/fahclient/cores/".
+       Make note of this path.
+
+    3. Stop the client
+    4. Run (as root; on Ubuntu prepend with "sudo"):
+
+       thekraken -i path-determined-in-step-2
+
+       Doing so should result in something along the following:
+
+       $ sudo thekraken -i /var/lib/fahclient/cores/
+       thekraken: The Kraken 0.4 (compiled Tue Apr 12 20:27:47 MDT 2011 by fah@tentacle)
+       thekraken: Processor affinity wrapper for Folding@Home
+       thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
+       thekraken: performing installation to /var/lib/fahclient/cores/
+       thekraken: descend into /var/lib/fahclient/cores/www.stanford.edu and all other subdirectories [Y/n]?
+
+       If path appears correct, confirm with "y" and press Enter. This should result
+       in something along the following:
+
+       thekraken: /var/lib/fahclient/cores/www.stanford.edu/~pande/Linux/AMD64/Core_a3.fah/FahCore_a3: wrapper succesfully installed
+       thekraken: /var/lib/fahclient/cores/www.stanford.edu/~pande/Linux/AMD64/Core_a5.fah/FahCore_a5: wrapper succesfully installed
+       thekraken: finished installation, 2 out of 2 files processed
+       $ 
+
+    5. Start the client
+
+
+
+6.3. Installation: V7 client with thread number override (bigadv WUs
+     on 6-core processors)
+
+    With the advent of V7 client, bigadv WU assignment criterium appears
+    to be number of processors requested ("cpus" parameter, by default
+    number of CPUs in the system).
+
+    To put it in different words, the only thing that needs to be done
+    to receive bigadv WU is setting "cpus" parameter to 8 or higher.
+
+    The downside of this approach is that now one gets to run 8 (or more)
+    threads on a 6-core processor, which is suboptimal.
+
+    The Kraken is capable of overriding number of threads when FahCore
+    is being started.
+
+    To take advantage of this feature, follow "Installation: V7 client"
+    but use the following command line in step 4:
+
+    thekraken -c np=6 -i path-determined-in-step-2
+
+    That's it.
+
+
+
+7. Uninstallation
+
+    Follow installation instructions but replace "thekraken -i" with "thekraken -u".
+
+
+
+8. How do I know it's working?
 
     While folding, run:
    
-      for i in $(ps -L auxw | grep FahCo  | awk '{ if ($4 > 10) print $3 }' | sort -n -k1,1) ; do taskset -pc $i  ; done
+      for i in $(ps -L auxw | awk '/FahCo[^[]/ { if ($4 > 10) print $3 }' | sort -n -k1,1) ; do taskset -pc $i  ; done
 
     Doing so should give you sequential processor numbers starting with 0 in its
-    output, i.e.:
+    output, e.g.:
 
     pid 41666's current affinity list: 0
     pid 41669's current affinity list: 1
@@ -196,7 +294,7 @@ Contents:
 
    
    
-7. Know issues and caveats
+9. Know issues and caveats
 
     CAUTION: FahCore_a5 is known to be problematic at user-induced shutdowns*.
              To be on a safe side make a backup of complete client directory
@@ -211,13 +309,22 @@ Contents:
 
     
     CAUTION: The Kraken may produce sub-optimal results
-             with nodes with no memory installed.
+             when nodes with no memory installed are present.
 
 
 
-8. Support
+10. Support
 
     Using AMDZone forum is recommended. Please post in this thread:
 
     http://www.amdzone.com/phpbb3/viewtopic.php?f=521&t=138463
 
+
+
+11. Credits
+
+    Langouste was written and is maintained by Kris Rusocki <kszysiu@gmail.com>
+
+    Special thanks go to:
+
+        brutis at AMDZone -- for excellent V7 test feedback

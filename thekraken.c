@@ -515,7 +515,7 @@ int main(int ac, char **av)
 		}
 		if (opt_help == 1) {
 			fprintf(stderr, "Usage:\n");
-			fprintf(stderr, "\t%s [-v] [-y] [-n] [-c opt1=val1] [-c opt2=val2] [...] [path]\n", av[0]);
+			fprintf(stderr, "\t%s [-v] [-y] [-n] [-c opt1=val1] [-c opt2=val2] [...] -i [path]\n", av[0]);
 			fprintf(stderr, "\t%s [-v] [-y] [-n] -u [path]\n", av[0]);
 			fprintf(stderr, "\t%s -h\n", av[0]);
 			fprintf(stderr, "\t%s -V\n", av[0]);
@@ -530,6 +530,8 @@ int main(int ac, char **av)
 			fprintf(stderr, "\t-v\t\tincrease verbosity; can be specified multiple times\n");
 			fprintf(stderr, "\t-y\t\tdo not ask for confirmation (non-interactive mode)\n");
 			fprintf(stderr, "\t-n\t\tno modify mode\n");
+			fprintf(stderr, "\t-c opt=val\tcreate configuration file with 'opt' variable\n");
+			fprintf(stderr, "\t\t\tset to 'val'; can be specified multiple times\n");
 			fprintf(stderr, "\t-V\t\tprint version information and exit\n");
 			fprintf(stderr, "\t-h\t\tdisplay this help and exit\n");
 			return 0;

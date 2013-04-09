@@ -1,3 +1,13 @@
+2010-04-12 -- New release (thekraken-0.4)
+-- huge documentation update
+-- set default install directory to /usr/bin rather than
+   /usr/local/bin which doesn't "work" with sudo
+-- configuration file support
+-- number-of-threads override feature for six-core machines
+   running bigadv WUs (see section 6.3 of the README.txt file)
+-- cosmetic code cleanups
+-- Makefile: minor tweaks
+
 
 2010-04-02 -- New release (thekraken-0.3)
 -- support V7 client: traverse directory structure
