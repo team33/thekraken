@@ -381,7 +381,7 @@ static void conf_create(int options)
 	if (options & OPT_NOMODIFY) {
 		return;
 	}
-	setfsuid(st.st_uid); /* reasonable assumption: files and directory they reside in are owned by the same user */
+	setfsuid(st.st_uid); /* reasonable assumption: files, and directory they reside in are owned by the same user */
 	setfsgid(st.st_gid);
 	fp = fopen(CONF_FN, "w");
 	if (fp) {
@@ -468,8 +468,6 @@ out:
 
 int main(int ac, char **av)
 {
-	int rv;
-
 	char nbin[PATH_MAX];
 	char *s, *t = nbin;
 	int len = 0;
@@ -497,7 +495,12 @@ int main(int ac, char **av)
 		int opt_install = 0, opt_uninstall = 0, opt_help = 0, opt_yes = 0, opt_version = 0, opt_nomodify = 0;
 		char *path = NULL;
 		int counter = 0, total = 0;
-		
+		int rv;
+
+		/* ugly, for conf_line_parse() */
+		logfp = stderr;
+		logfd = 2;
+
 		fprintf(stderr, WELCOME_LINES, get_build_info());
 		opterr = 0;
 		while ((c = getopt(ac, av, "+iuhyvnVc:")) != -1) {
@@ -526,6 +529,7 @@ int main(int ac, char **av)
 				case 'c':
 					custom_config = 1;
 					conf_line_add(av[optind - 1]);
+					conf_line_parse(av[optind -1]);
 					break;
 				case '?':
 					if (optopt != 'c')
@@ -538,16 +542,21 @@ int main(int ac, char **av)
 					return -1;
 			}
 		}
+		rv = opt_install + opt_uninstall + opt_help + opt_version;
+		if (rv > 1) {
+			fprintf(stderr, "thekraken: error: choose either of '-i', '-u', '-h' or '-V'\n");
+			return -1;
+		}
+		if (rv == 0) {
+			opt_help = 1;
+		}
 		if (opt_install || opt_uninstall) {
 			if (optind + 1 < ac) {
 				fprintf(stderr, "thekraken: error: parameter not recognized: %s\n", av[optind + 1]);
 				return -1;
 			}
 		} else {
-			if (optind == ac) {
-				fprintf(stderr, "thekraken: error: choose either of '-i', '-u', '-h' or '-V'\n");
-				opt_help = 1;
-			} else {
+			if (optind < ac) {
 				fprintf(stderr, "thekraken: error: parameter not recognized: %s\n", av[optind]);
 				return -1;
 			}
@@ -577,10 +586,6 @@ int main(int ac, char **av)
 			fprintf(stderr, "\t-V\t\tprint version information and exit\n");
 			fprintf(stderr, "\t-h\t\tdisplay this help and exit\n");
 			return 0;
-		}
-		if (opt_install && opt_uninstall) {
-			fprintf(stderr, "thekraken: error: can't install and uninstall at the same time; choose one\n");
-			return -1;
 		}
 		if (optind < ac) {
 			path = av[optind];
@@ -729,6 +734,8 @@ int main(int ac, char **av)
 	}
 
 	while (1) {
+		int rv;
+
 		rv = waitpid(-1, &status, __WALL);
 		if (rv == -1) {
 			fprintf(logfp, "thekraken: waitpid() returns -1 (errno %d)\n", errno);
@@ -779,6 +786,7 @@ int main(int ac, char **av)
 						fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns -1 (errno %d)\n", errno);
 					}
 				} else if (cpid != -1) {
+					fprintf(logfp, "thekraken: Forked %d.\n", cpid);
 					autorestart_done = 1;
 					continue;
 				}
