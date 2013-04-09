@@ -168,41 +168,25 @@ int main(int ac, char **av)
 		char *path = NULL;
 		
 		fprintf(stderr, WELCOME_LINES);
-		//opterr = 0;
-		while ((c = getopt(ac, av, ":i:u:h")) != -1) {
+		opterr = 0;
+		while ((c = getopt(ac, av, "+iuh")) != -1) {
 			switch (c) {
 				case 'i':
 					opt_install = 1;
-					path = optarg;
 					break;
 				case 'u':
 					opt_uninstall = 1;
-					path = optarg;
 					break;
 				case 'h':
 					opt_help = 1;
 					break;
 				case '?':
-					fprintf(stderr, "thekraken: unknown option: -%c\n", optopt);
+					fprintf(stderr, "thekraken: error: unknown option: -%c\n", optopt);
 					return -1;
-				case ':':
-					if (optopt == 'i') {
-						opt_install = 1;
-						break;
-					}
-					if (optopt == 'u') {
-						opt_uninstall = 1;
-						break;
-					}
-					break;
 				default:
 					fprintf(stderr, "thekraken: internal error (1); please report this issue\n");
 					return -1;
 			}
-		}
-		if (optind < ac) {
-			fprintf(stderr, "thekraken: unknown parameter: %s\n", av[optind]);
-			return -1;
 		}
 		if (!opt_install && !opt_uninstall) {
 			opt_help = 1;
@@ -215,6 +199,13 @@ int main(int ac, char **av)
 		if (opt_install && opt_uninstall) {
 			fprintf(stderr, "thekraken: error: can't install and uninstall at the same time; choose one\n");
 			return -1;
+		}
+		if (optind + 1 < ac) {
+			fprintf(stderr, "thekraken: error: extra argument: %s\n", av[optind + 1]);
+			return -1;
+		}
+		if (optind < ac) {
+			path = av[optind];
 		}
 		if (opt_install) {
 			fprintf(stderr, "thekraken: performing installation\n");
