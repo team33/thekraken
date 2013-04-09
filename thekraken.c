@@ -1049,8 +1049,8 @@ int main(int ac, char **av)
 							cpid_insyscall = 0;
 
 							getstr(rv, fn, -1, buf, &bufpos, sizeof(buf));
-							if (!strncmp("work/logfile_", buf, 13)) {
-								llog("thekraken: %d: logfile fd: %ld\n", rv, ret);
+							if (strstr(buf, "/logfile_")) {
+								llog("thekraken: %d: logfile fd: %ld (pathname: %s)\n", rv, ret, buf);
 								fahcore_logfd = ret;
 							}
 						}

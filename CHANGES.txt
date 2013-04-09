@@ -1,3 +1,8 @@
+2012-06-03 -- Prerelease (thekraken-0.7-pre13)
+-- detect logfile fd with greater deal of flexibility
+   to accommodate V7 client
+
+
 2012-06-02 -- Prerelease (thekraken-0.7-pre12)
 -- add startup deadline so broken units fail early
 -- include improved logging infrastructure
