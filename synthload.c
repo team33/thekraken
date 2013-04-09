@@ -138,6 +138,8 @@ pid_t synthload_start(unsigned int onperiod, unsigned int offperiod, unsigned in
 		return -1;
 	}
 	if (mpid == 0) {
+		sigset_t unblock;
+
 		/* reset signals that defaulted from the main kraken process */
 		signal(SIGTERM, SIG_DFL);
 		signal(SIGINT, SIG_DFL);
@@ -146,6 +148,11 @@ pid_t synthload_start(unsigned int onperiod, unsigned int offperiod, unsigned in
 		
 		signal(SIGCHLD, sigchldhandler);
 		prctl(PR_SET_PDEATHSIG, SIGHUP);
+
+		sigemptyset(&unblock);
+		sigaddset(&unblock, SIGTERM);
+		sigaddset(&unblock, SIGHUP);
+		sigprocmask(SIG_UNBLOCK, &unblock, NULL);
 
 		/* create the handler for SIGALRM so the handler will receive extra info */
 		sa.sa_flags = SA_SIGINFO;

@@ -50,8 +50,10 @@
 #define WELCOME_LINE3 "thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2\n"
 #define CA5_SHORT "FahCore_a5"
 #define CA3_SHORT "FahCore_a3"
+#define CA4_SHORT "FahCore_a4"
 #define CA5 "FahCore_a5.exe"
 #define CA3 "FahCore_a3.exe"
+#define CA4 "FahCore_a4.exe"
 #define SIZE_THRESH 204800
 #define LOGFN "thekraken.log"
 #define LOGFN_PREV "thekraken-prev.log"
@@ -60,7 +62,7 @@
 #define CONF_WARNING "#\n# WARNING: DO NOT MODIFY THIS FILE\n# Instead, unwrap The Kraken and re-wrap with desired configuration variables.\n#\n"
 #define CONF_FN "thekraken.cfg"
 
-static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, NULL };
+static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, CA4, CA4_SHORT, NULL };
 
 extern char **environ;
 
