@@ -1,0 +1,42 @@
+#!/bin/sh
+
+MAKE=gmake
+
+which gmake
+x=$?
+if [ x$x != x0 ]; then
+	MAKE=make
+fi
+
+PROJECTNAME="$(basename $PWD)-`cat VERSION`"
+OLDDIR="`pwd`"
+
+cd ..
+rm -fr release-$$
+mkdir release-$$
+cd release-$$
+
+x=$?
+
+if [ x$x != x0 ]; then
+	echo "ZONK\!"
+	exit 1
+fi
+
+rm -fr *
+
+RELDIR=`pwd`
+
+echo `pwd`: cp -R $OLDDIR $PROJECTNAME
+cp -R $OLDDIR $PROJECTNAME
+
+cd *
+$MAKE distclean
+
+cd $RELDIR
+tar -zcvf ../$PROJECTNAME.tar.gz $PROJECTNAME
+
+cd ..
+rm -fr release-$$
+
+cd $OLDDIR

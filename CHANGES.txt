@@ -1,0 +1,9 @@
+
+2010-04-02 -- New release (thekraken-0.3)
+-- support V7 client: traverse directory structure
+-- support V7 client: preserve file ownership (if run by root)
+-- option parsing code is now more civilized (getopt)
+-- first release with half-decent documentation
+
+
+2010-03-15 -- Initial release (thekraken-0.2)
