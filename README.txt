@@ -79,7 +79,7 @@ Contents:
     1. Run "make"
     2. Run "sudo make install" (or call "make install" as root)
     
-    Voila. The Kraken is available in /usr/local/bin.
+    Voila. The Kraken is available in /usr/bin.
 
 
 

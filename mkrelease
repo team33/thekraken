@@ -19,7 +19,7 @@ cd release-$$
 x=$?
 
 if [ x$x != x0 ]; then
-	echo "ZONK\!"
+	echo 'Oops!'
 	exit 1
 fi
 

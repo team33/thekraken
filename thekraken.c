@@ -34,6 +34,8 @@
 #include <sys/fsuid.h>
 #include <termios.h>
 
+#include <ctype.h>
+
 #include "version.h"
 #include "build.h"
 
@@ -45,15 +47,21 @@
 #define SIZE_THRESH 204800
 #define LOGFN "thekraken.log"
 #define LOGFN_PREV "thekraken-prev.log"
+#define INSTALL_FMT "thekraken-%s"
+
+#define CONF_WARNING "#\n# WARNING: DO NOT MODIFY THIS FILE\n# Instead, uninstall The Kraken and re-install with desired configuration variables.\n#\n"
+#define CONF_FN "thekraken.cfg"
 
 static char *core_list[] = { CA3, CA3_SHORT, CA5, CA5_SHORT, NULL };
 
 extern char **environ;
 static int cpid;
-static FILE *fp;
+static FILE *logfp;
 
 static int debug_level;
 #define debug(_lev) if (debug_level >= _lev)
+
+static int custom_config;
 
 static char wdbuf[PATH_MAX];
 static char *k_getwd(void)
@@ -63,7 +71,7 @@ static char *k_getwd(void)
 
 static void sighandler(int n)
 {
-	fprintf(fp, "thekraken: got signal 0x%08x\n", n);
+	fprintf(logfp, "thekraken: got signal 0x%08x\n", n);
 	kill(cpid, n);
 }
 
@@ -92,7 +100,10 @@ out_err:
 	return -1;
 }
 
-static int install(char *s)
+#define OPT_YES 1
+#define OPT_NOMODIFY 2
+
+static int install(char *s, int options)
 {
 	struct stat st;
 	char fn[32];
@@ -106,7 +117,10 @@ static int install(char *s)
 	if (st.st_size < SIZE_THRESH) {
 		return 1; /* already installed */
 	}
-	sprintf(fn, "thekraken-%s", s);
+	if (options & OPT_NOMODIFY) {
+		return 0;
+	}
+	sprintf(fn, INSTALL_FMT, s);
 	if (rename(s, fn)) {
 		return 2; /* problems, no installation performed */
 	}
@@ -140,32 +154,47 @@ static void install_summary(char *d, char *s, int rv)
 	}
 }
 
-static void list_install(int *counter, int *total)
+static int list_install(int options, int *counter, int *total)
 {
 	char **s = core_list;
 	int rv;
 	char *d = k_getwd();
+	int ret = 0;
 	
 	while (*s) {
-		if (!(rv = install(*s)))
+		if (!(rv = install(*s, options))) {
 			(*counter)++;
+			ret = 1;
+		}
 		if (rv >= 0) {
 			(*total)++;
 		}
 		install_summary(d, *s, rv);
 		s++;
 	}
+	return ret;
 }
 
-static int uninstall(char *s)
+static int uninstall(char *s, int options)
 {	
 	char fn[32];
 	int rv;
+	struct stat st;
 	
-	sprintf(fn, "thekraken-%s", s);
-	
+	sprintf(fn, INSTALL_FMT, s);
+
+	if (lstat(fn, &st)) {
+		return -1;
+	}
+	if (!S_ISREG(st.st_mode)) {
+		return 1;
+	}
+	if (options & OPT_NOMODIFY) {
+		return 0;
+	}
+
 	rv = rename(fn, s);
-	if (rv == -1 && errno != ENOENT) {
+	if (rv == -1) {
 		rv = 1;
 	}
 	return rv;
@@ -185,24 +214,148 @@ static void uninstall_summary(char *d, char *s, int rv)
 	}
 }
 
-static void list_uninstall(int *counter, int *total)
+static int list_uninstall(int options, int *counter, int *total)
 {
 	char **s = core_list;
 	int rv;
 	char *d = k_getwd();
+	int ret = 0;
 	
 	while (*s) {
-		if (!(rv = uninstall(*s)))
+		if (!(rv = uninstall(*s, options))) {
 			(*counter)++;
+			ret = 1;
+		}
 		if (rv >= 0) {
 			(*total)++;
 		}
 		uninstall_summary(d, *s, rv);
 		s++;
 	}
+	return ret;
 }
 
+#define CONF_NP 0
 
+static char **conf_line;
+static int conf_index;
+static int conf_total;
+static int conf_step = 4;
+
+static char *conf_key[] = { "np" , NULL };
+static char *conf_val[sizeof(conf_key)/sizeof(char *)];
+
+static int conf_np = 0;
+
+static void conf_line_add(char *s)
+{
+	if (conf_index == conf_total) {
+		conf_total += conf_step;
+		conf_step <<= 1;
+		conf_line = realloc(conf_line, conf_total * sizeof(*conf_line));
+	}
+	conf_line[conf_index++] = s;
+}
+
+/* TODO: fscanf? */
+static int conf_line_parse(char *s)
+{
+	char *e;
+	char key[32];
+	int i;
+	int klen;
+	
+	e = strchr(s, '=');
+	if (!e) {
+		return 1;
+	}
+	klen = e - s;
+	if (klen >= sizeof(key)) {
+		return 2;
+	}
+	memcpy(key, s, klen);
+	key[klen] = '\0';
+
+	for (i = 0; conf_key[i]; i++) {
+		int len, vlen;
+		
+		len = strlen(s);
+		if (!isprint(s[len - 1])) {
+			len--;
+		}
+		vlen = len - (klen + 1);
+		if (!strcmp(conf_key[i], key)) {
+			if (conf_val[i]) {
+				fprintf(logfp, "thekraken: WARNING: configuration variable '%s' defined multiple times; last definition in effect\n", key);
+				free(conf_val[i]);
+			}
+			conf_val[i] = malloc(vlen + 1);
+			memcpy(conf_val[i], e + 1, vlen);
+			conf_val[i][vlen] = '\0';
+			break;
+		}
+	}
+	if (!conf_key[i]) {
+		fprintf(logfp, "thekraken: WARNING: unknown configuration variable '%s'\n", key);
+	}
+	return 0;
+}
+
+static int conf_file_parse(char *fn)
+{
+	FILE *fp;
+	char buf[128];
+	
+	fp = fopen(fn, "r");
+	if (!fp) {
+		return 1;
+	}
+	while (fgets(buf, sizeof(buf), fp)) {
+		buf[sizeof(buf) - 1] = '\0';
+		conf_line_parse(buf);
+	}
+	fclose(fp);
+
+	if (conf_val[CONF_NP]) {
+		char *end;
+
+		conf_np = strtol(conf_val[CONF_NP], &end, 10);
+		if (*end != '\0' || conf_np < 2 || conf_np > 32) {
+			fprintf(logfp, "thekraken: invalid value for 'np', ignored\n");
+			conf_np = 0;
+		} else {
+			fprintf(logfp, "thekraken: config: np=%d\n", conf_np);
+		}
+	}
+	return 0;
+}
+
+static void conf_create(int options)
+{
+	FILE *fp;
+	struct stat st;
+	
+	if (lstat(".", &st)) {
+		return;
+	}
+	if (options & OPT_NOMODIFY) {
+		return;
+	}
+	setfsuid(st.st_uid); /* reasonable assumption: files and directory they reside in are owned by the same user */
+	setfsgid(st.st_gid);
+	fp = fopen(CONF_FN, "w");
+	if (fp) {
+		int i;
+
+		fprintf(fp, CONF_WARNING);
+		for (i = 0; i < conf_index; i++) {
+			fprintf(fp, "%s\n", conf_line[i]);
+		}
+		fclose(fp);
+	}
+	setfsuid(geteuid());
+	setfsgid(getegid());
+}
 
 static void traverse(char *what, int how, int options, int *counter, int *total)
 {
@@ -215,9 +368,23 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 	}
 	debug(1) fprintf(stderr, "thekraken: entered %s\n", what);
 	if (!how) {
-		list_install(counter, total);
+		if (list_install(options, counter, total)) {
+			if (custom_config) {
+				/* some installations performed, create config file */
+				fprintf(stderr, "thekraken: creating configuration file\n");
+				conf_create(options);
+			}
+		}
 	} else {
-		list_uninstall(counter, total);
+		if (list_uninstall(options, counter, total)) {
+			if (!lstat(CONF_FN, &st)) {
+				/* some uninstallations performed, remove config file */
+				fprintf(stderr, "thekraken: removing configuration file\n");
+				if ((options & OPT_NOMODIFY) == 0) {
+					unlink(CONF_FN);
+				}
+			}
+		}
 	}
 	d = opendir(".");
 	if (!d) {
@@ -234,7 +401,7 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 			continue;
 		if (!S_ISDIR(st.st_mode))
 			continue;
-		if (!options) {
+		if ((options & OPT_YES) == 0) {
 			struct termios t;
 			char *wd = k_getwd();
 			int c;
@@ -242,14 +409,14 @@ static void traverse(char *what, int how, int options, int *counter, int *total)
 			if (!tcgetattr(0, &t)) {
 				fprintf(stderr, "thekraken: descend into %s/%s and all other subdirectories [Y/n]? ", wd, de->d_name);
 				if ((c = getchar()) == 'y' || c == 'Y' || c == '\n')
-					options = 1;
+					options |= OPT_YES;
 			} else {
 				fprintf(stderr, "thekraken: standard input is not a terminal, not descending into %s/%s or any other subdirectories\n", wd, de->d_name);
 			}
-			if (!options)
+			if ((options & OPT_YES) == 0)
 				break;
 		}
-		if (options)
+		if (options & OPT_YES)
 			traverse(de->d_name, how, options, counter, total);
 	}
 	closedir(d);
@@ -267,6 +434,8 @@ int main(int ac, char **av)
 	char nbin[PATH_MAX];
 	char *s, *t = nbin;
 	int len = 0;
+	char config[PATH_MAX];
+	char *u = config;
 	
 	int status;
 
@@ -283,13 +452,13 @@ int main(int ac, char **av)
 	
 	if (strstr(s, "thekraken")) {
 		int c; 
-		int opt_install = 0, opt_uninstall = 0, opt_help = 0, opt_yes = 0, opt_version = 0;
+		int opt_install = 0, opt_uninstall = 0, opt_help = 0, opt_yes = 0, opt_version = 0, opt_nomodify = 0;
 		char *path = NULL;
 		int counter = 0, total = 0;
 		
 		fprintf(stderr, WELCOME_LINES, get_build_info());
 		opterr = 0;
-		while ((c = getopt(ac, av, "+iuhyvV")) != -1) {
+		while ((c = getopt(ac, av, "+iuhyvnVc:")) != -1) {
 			switch (c) {
 				case 'i':
 					opt_install = 1;
@@ -309,8 +478,18 @@ int main(int ac, char **av)
 				case 'V':
 					opt_version = 1;
 					break;
+				case 'n':
+					opt_nomodify = 1;
+					break;
+				case 'c':
+					custom_config = 1;
+					conf_line_add(av[optind - 1]);
+					break;
 				case '?':
-					fprintf(stderr, "thekraken: error: option not recognized: -%c\n", optopt);
+					if (optopt != 'c')
+						fprintf(stderr, "thekraken: error: option not recognized: -%c\n", optopt);
+					else
+						fprintf(stderr, "thekraken: error: option '-%c' requires an argument\n", optopt);
 					return -1;
 				default:
 					fprintf(stderr, "thekraken: internal error (1); please report this issue\n");
@@ -324,6 +503,7 @@ int main(int ac, char **av)
 			}
 		} else {
 			if (optind == ac) {
+				fprintf(stderr, "thekraken: error: choose either of '-i', '-u', '-h' or '-V'\n");
 				opt_help = 1;
 			} else {
 				fprintf(stderr, "thekraken: error: parameter not recognized: %s\n", av[optind]);
@@ -335,9 +515,10 @@ int main(int ac, char **av)
 		}
 		if (opt_help == 1) {
 			fprintf(stderr, "Usage:\n");
-			fprintf(stderr, "\t%s [-v] [-y] -i [path]\n", av[0]);
-			fprintf(stderr, "\t%s [-v] [-y] -u [path]\n", av[0]);
+			fprintf(stderr, "\t%s [-v] [-y] [-n] [-c opt1=val1] [-c opt2=val2] [...] [path]\n", av[0]);
+			fprintf(stderr, "\t%s [-v] [-y] [-n] -u [path]\n", av[0]);
 			fprintf(stderr, "\t%s -h\n", av[0]);
+			fprintf(stderr, "\t%s -V\n", av[0]);
 			fprintf(stderr, "\n");
 			fprintf(stderr, "Options:\n");
 			fprintf(stderr, "\t-i [path]\tinstall The Kraken in 'path' directory and all its\n");
@@ -348,6 +529,7 @@ int main(int ac, char **av)
 			fprintf(stderr, "\t\t\tis used\n");
 			fprintf(stderr, "\t-v\t\tincrease verbosity; can be specified multiple times\n");
 			fprintf(stderr, "\t-y\t\tdo not ask for confirmation (non-interactive mode)\n");
+			fprintf(stderr, "\t-n\t\tno modify mode\n");
 			fprintf(stderr, "\t-V\t\tprint version information and exit\n");
 			fprintf(stderr, "\t-h\t\tdisplay this help and exit\n");
 			return 0;
@@ -364,7 +546,7 @@ int main(int ac, char **av)
 		}
 		if (opt_install) {
 			fprintf(stderr, "thekraken: performing installation to %s\n", path);
-			traverse(path, 0, opt_yes, &counter, &total);
+			traverse(path, 0, (opt_yes ? OPT_YES : 0) | (opt_nomodify ? OPT_NOMODIFY : 0), &counter, &total);
 			if (total == 0) {
 				fprintf(stderr, "thekraken: finished installation, found no files to process\n");
 			} else {
@@ -374,7 +556,7 @@ int main(int ac, char **av)
 		}
 		if (opt_uninstall) {
 			fprintf(stderr, "thekraken: performing uninstallation from %s\n", path);
-			traverse(path, 1, opt_yes, &counter, &total);
+			traverse(path, 1, (opt_yes ? OPT_YES : 0) | (opt_nomodify ? OPT_NOMODIFY : 0), &counter, &total);
 			if (total == 0) {
 				fprintf(stderr, "thekraken: finished uninstallation, found no files to process\n");
 			} else {
@@ -390,29 +572,37 @@ int main(int ac, char **av)
 	}
 
 	rename(LOGFN, LOGFN_PREV);
-	fp = fopen(LOGFN, "w");
-	if (fp) {
-		setvbuf(fp, NULL, _IONBF, 0);
+	logfp = fopen(LOGFN, "w");
+	if (logfp) {
+		setvbuf(logfp, NULL, _IONBF, 0);
 		fprintf(stderr, WELCOME_LINES, get_build_info());
 		fprintf(stderr, "thekraken: Logging to " LOGFN "\n");
 	} else {
 		/* fail silently */
-		fp = stderr;
+		logfp = stderr;
 	}
-	fprintf(fp, WELCOME_LINES, get_build_info());
+	fprintf(logfp, WELCOME_LINES, get_build_info());
 	
 	s = strrchr(av[0], '/');
 	if (s) {
 		len = s - av[0] + 1;
 		memcpy(t, av[0], len);
+		memcpy(u, av[0], len); /* dirname (for config file) */
 		s++;
 	} else {
 		s = av[0];
 	}
 	t += len;
 	nbin[sizeof(nbin) - 1] = '\0';
-	snprintf(t, sizeof(nbin) - len - 1, "thekraken-%s", s);
-	fprintf(fp, "thekraken: Launch binary: %s\n", nbin);
+	snprintf(t, sizeof(nbin) - len - 1, INSTALL_FMT, s);
+	fprintf(logfp, "thekraken: launch binary: %s\n", nbin);
+
+	u += len;
+	config[sizeof(config) - 1] = '\0';
+	snprintf(u, sizeof(config) - len - 1, "%s", CONF_FN);
+	fprintf(logfp, "thekraken: config file: %s\n", config);
+	
+	conf_file_parse(config);
 
 	signal(SIGHUP, sighandler);
 	signal(SIGTERM, sighandler);
@@ -421,29 +611,42 @@ int main(int ac, char **av)
 	
 	cpid = fork();
 	if (cpid == -1) {
-		fprintf(fp, "thekraken: fork: %s\n", strerror(errno));
+		fprintf(logfp, "thekraken: fork: %s\n", strerror(errno));
 		return -1;
 	}
 	if (cpid == 0) {
 		long prv;
+		char **avclone;
+		int i;
 		
 		prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
-		fprintf(fp, "thekraken: child: ptrace(PTRACE_TRACEME) returns with %ld (%s)\n", prv, strerror(errno));
+		fprintf(logfp, "thekraken: child: ptrace(PTRACE_TRACEME) returns with %ld (%s)\n", prv, strerror(errno));
 		if (prv != 0) {
 			return -1;
 		}
-		fprintf(fp, "thekraken: child: Executing...\n");
-		execvp(nbin, av);
-		fprintf(fp, "thekraken: child: exec: %s\n", strerror(errno));
+		fprintf(logfp, "thekraken: child: Executing...\n");
+
+		avclone = malloc((ac + 1) * sizeof(*avclone));
+		for (i = 0; i < ac; i++) {
+			avclone[i] = av[i];
+			if (conf_np && !strcmp(av[i], "-np")) {
+				avclone[i + 1] = conf_val[CONF_NP];
+				i++;
+			}
+		}
+		avclone[ac] = NULL;
+
+		execvp(nbin, avclone);
+		fprintf(logfp, "thekraken: child: exec: %s\n", strerror(errno));
 		return -1;
 	}
 		
-	fprintf(fp, "thekraken: Forked %d.\n", cpid);
+	fprintf(logfp, "thekraken: Forked %d.\n", cpid);
 
 	while (1) {
 		status = 0;
 		rv = waitpid(-1, &status, __WALL);
-		fprintf(fp, "thekraken: waitpid() returns %d with status 0x%08x (errno %d)\n", rv, status, errno);
+		fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x (errno %d)\n", rv, status, errno);
 		if (rv == -1) {
 			if (errno == EINTR) {
 				continue;
@@ -451,16 +654,16 @@ int main(int ac, char **av)
 			return -1;
 		}
 		if (WIFEXITED(status)) {
-			fprintf(fp, "thekraken: %d: exited with %d\n", rv, WEXITSTATUS(status));
+			fprintf(logfp, "thekraken: %d: exited with %d\n", rv, WEXITSTATUS(status));
 			if (rv != cpid) {
-				fprintf(fp, "thekraken: %d: ignoring clone exit\n", rv);
+				fprintf(logfp, "thekraken: %d: ignoring clone exit\n", rv);
 				continue;
 			}
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
 			/* will never happen? */
-			fprintf(fp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
+			fprintf(logfp, "thekraken: %d: got signal %d\n", rv, WTERMSIG(status));
 			raise(WTERMSIG(status));
 			return -1;
 		}
@@ -469,7 +672,7 @@ int main(int ac, char **av)
 			long prv;
 			//struct user_regs_struct regs; // stack examination?
 
-			fprintf(fp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
+			fprintf(logfp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
 			if (WSTOPSIG(status) == SIGTRAP) {
 				long cloned = -1;
 				e = status >> 16;
@@ -478,10 +681,10 @@ int main(int ac, char **av)
 
 					prv = ptrace(PTRACE_GETEVENTMSG, rv, 0, &cloned);
 					c = cloned;
-					fprintf(fp, "thekraken: %d: cloned %d\n", rv, c);
+					fprintf(logfp, "thekraken: %d: cloned %d\n", rv, c);
 					nclones++;
 					if (nclones != 2 && nclones != 3) {
-						fprintf(fp, "thekraken: %d: binding to cpu %d\n", c, lastcpu);
+						fprintf(logfp, "thekraken: %d: binding to cpu %d\n", c, lastcpu);
 						CPU_ZERO(&cpuset);
 						CPU_SET(lastcpu, &cpuset);
 						lastcpu++;
@@ -489,23 +692,23 @@ int main(int ac, char **av)
 					}
 				} else if (e == 0) {
 					/* initial attach? */
-					fprintf(fp, "thekraken: %d: initial attach\n", rv);
+					fprintf(logfp, "thekraken: %d: initial attach\n", rv);
 					prv = ptrace(PTRACE_SETOPTIONS, rv, 0, PTRACE_O_TRACECLONE);
 				}
-				fprintf(fp, "thekraken: %d: Continuing.\n", rv);
+				fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
 				prv = ptrace(PTRACE_CONT, rv, 0, 0);
 				continue;
 			}
 			if (WSTOPSIG(status) == SIGSTOP) {
-				fprintf(fp, "thekraken: %d: Continuing.\n", rv);
+				fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
 				prv = ptrace(PTRACE_CONT, rv, 0, 0);
 				continue;
 			}
-			fprintf(fp, "thekraken: %d: Continuing (forwarding signal %d).\n", rv, WSTOPSIG(status));
+			fprintf(logfp, "thekraken: %d: Continuing (forwarding signal %d).\n", rv, WSTOPSIG(status));
 			prv = ptrace(PTRACE_CONT, rv, 0, WSTOPSIG(status));
 			continue;
 		}
-		fprintf(fp, "thekraken: %d: unknown waitpid status, halt!\n", rv);
+		fprintf(logfp, "thekraken: %d: unknown waitpid status, halt!\n", rv);
 	}
 	return 0;
 }
