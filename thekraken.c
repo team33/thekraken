@@ -520,17 +520,30 @@ static void getstr(pid_t child, long addr, int len, char *dst, int *dstofs, int 
 	int i = 0;
 	char *curstr = dst + *dstofs;
 	long chunk;
+	int plen;
 	
-	if (len > dstsize - *dstofs - 1) {
-		len = dstsize - *dstofs - 1;
+	if (len > dstsize - *dstofs - 1 || len == -1) {
+		plen = dstsize - *dstofs - 1;
+	} else {
+		plen = len;
 	}
 
-	while(i < len) {
-		int tocpy = len - i > sizeof(long) ? sizeof(long) : len - i;
+	while (i < plen) {
+		int tocpy = plen - i > sizeof(long) ? sizeof(long) : plen - i;
+
 		chunk = ptrace(PTRACE_PEEKDATA, child, addr + i);
 		memcpy(curstr, &chunk, tocpy);
 		i += tocpy;
 		curstr += tocpy;
+
+		if (len == -1) {
+			while (tocpy > 0) {
+				if ((chunk & 0xFF) == 0)
+					break;
+				chunk >>= 8;
+				tocpy--;
+			}
+		}
 	}
 	*curstr = '\0';
 	*dstofs = curstr - dst;
@@ -546,7 +559,7 @@ int main(int ac, char **av)
 	
 	int status;
 
-	int nclones = 0;
+	int nclones = -1;
 	int last_used_cpu = 0;
 	cpu_set_t cpuset;
 
@@ -554,7 +567,8 @@ int main(int ac, char **av)
 	pid_t mpid = 0; /* load manager PID */
 
 #define FAHCORE_BUF_SIZE 128
-#define FAHCORE_LOG_FD 5
+	int fahcore_logfd = -1;
+
 	/* setup the buffer to store data written to logfile_xx.txt and stderr */
 	char fahcore_logbuf[FAHCORE_BUF_SIZE];
 	int fahcore_logbufpos = 0;
@@ -562,6 +576,7 @@ int main(int ac, char **av)
 	int fahcore_errbufpos = 0;
 
 	int tpid_insyscall = 0;
+	int cpid_insyscall = 0;
 	
 	time_t synthload_start_time = 0;
 	
@@ -792,7 +807,7 @@ int main(int ac, char **av)
 			}
 			return -1;
 		}
-		if (rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
+		if (rv != tpid && (rv != cpid || fahcore_logfd != -1)) /* ignore the talkative FahCore process or it will flood the log */
 			fprintf(logfp, "thekraken: waitpid() returns %d with status 0x%08x\n", rv, status);
 
 		if (WIFEXITED(status)) {
@@ -834,21 +849,23 @@ int main(int ac, char **av)
 			long prv;
 			int ptrace_request;
 
-			if (rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
+			if (rv != tpid && (rv != cpid || fahcore_logfd != -1)) /* ignore the talkative FahCore process or it will flood the log */
 				fprintf(logfp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
 
 			if (WSTOPSIG(status) == SIGTRAP) {
 				long cloned = -1;
 				e = status >> 16;
 
-				if (nclones == 0 && e == 0) {
+				if (nclones == -1 && e == 0) {
 					/* initial attach */
 					fprintf(logfp, "thekraken: %d: initial attach\n", rv);
 					prv = ptrace(PTRACE_SETOPTIONS, rv, 0, PTRACE_O_TRACECLONE);
 					fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
-					prv = ptrace(PTRACE_CONT, rv, 0, 0);
+					prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);
+					nclones++;
 					continue;
 				}
+
 				if (e & PTRACE_EVENT_CLONE) {
 					int c;
 
@@ -873,7 +890,7 @@ int main(int ac, char **av)
 					 * tpid clones add'l threads; if that wasn't the case, calling
 					 * ptrace(PTRACE_SYSCALL, tpid, ...) would be challenging...
 					 */
-					if (rv == tpid) {
+					if (rv == tpid || (rv == cpid && fahcore_logfd == -1)) {
 						fprintf(logfp, "thekraken: %d: Continuing (SYSCALL).\n", rv);
 						prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
 					} else {
@@ -894,7 +911,7 @@ int main(int ac, char **av)
 					msgaddr = regs.rsi;
 					msglen = regs.rdx;
 
-					if (call == SYS_write && fd == FAHCORE_LOG_FD) {
+					if (call == SYS_write && fd == fahcore_logfd) {
 						if (!tpid_insyscall) {
 							tpid_insyscall = 1;
 							getstr(rv, msgaddr, msglen, fahcore_logbuf, &fahcore_logbufpos, sizeof(fahcore_logbuf));
@@ -940,7 +957,38 @@ int main(int ac, char **av)
 							tpid_insyscall = 0;
 						}
 					}
+
 					/* talkative FahCore process; notify us of the next syscall entry/exit */
+					prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
+					continue;
+				}
+
+				if (rv == cpid && fahcore_logfd == -1) {
+					long call, fn, ret;
+					struct user_regs_struct regs;
+
+					ptrace(PTRACE_GETREGS, rv, NULL, &regs);
+					call = regs.orig_rax;
+					fn = regs.rdi;
+					ret = regs.rax;
+
+					if (call == SYS_open) {
+						if (!cpid_insyscall) {
+							cpid_insyscall = 1;
+						} else {
+							char buf[16];
+							int bufpos = 0;
+
+							cpid_insyscall = 0;
+
+							getstr(rv, fn, -1, buf, &bufpos, sizeof(buf));
+							if (!strncmp("work/logfile_", buf, 13)) {
+								fprintf(logfp, "thekraken: %d: logfile fd: %ld\n", rv, ret);
+								fahcore_logfd = ret;
+							}
+						}
+					}
+
 					prv = ptrace(PTRACE_SYSCALL, rv, 0, 0);	
 					continue;
 				}
@@ -950,11 +998,16 @@ int main(int ac, char **av)
 				continue;
 			}
 
-			if (rv == tpid) {
-				tpid_insyscall = 0; /* any syscalls have been interrupted */
+			if (rv == tpid || (rv == cpid && fahcore_logfd == -1)) {
 				ptrace_request = PTRACE_SYSCALL;
 			} else {
 				ptrace_request = PTRACE_CONT;
+			}
+
+			if (rv == tpid) {
+				tpid_insyscall = 0;
+			} else if (rv == cpid && fahcore_logfd == -1) {
+				cpid_insyscall = 0;
 			}
 
 			/*
