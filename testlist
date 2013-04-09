@@ -1,0 +1,5 @@
+- Ctrl+C
+- killall -KILL fah6
+- killall -INT fah6
+- kill fah6
+- close terminal window

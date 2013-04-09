@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2011,2012 by Kris Rusocki <kszysiu@gmail.com>
  * Copyright (C) 2012 by Stephen Gordon <firedfly@gmail.com>
+ * Copyright (C) 2012 by Kris Rusocki <kszysiu@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License
@@ -32,7 +32,7 @@ static timer_t load_timer, deadline_timer;
 
 static void sigalrmhandler(int sig, siginfo_t *si, void *uc)
 {
-	if(si->si_value.sival_ptr == &deadline_timer) {
+	if (si->si_value.sival_ptr == &deadline_timer) {
 		_exit(0);
 	}
 
@@ -95,10 +95,10 @@ static int create_workers(int workers, int startcpu, unsigned int onperiod, unsi
 
 	for(; workers > 0; workers--) {
 		pid = fork();
-		if(pid == -1) {
+		if (pid == -1) {
 			return -1;
 		}
-		if(pid == 0) {
+		if (pid == 0) {
 			prctl(PR_SET_PDEATHSIG, SIGHUP);
 			setup_alarms(onperiod, offperiod, deadline);
 			load();
@@ -134,15 +134,18 @@ pid_t synthload_start(unsigned int onperiod, unsigned int offperiod, unsigned in
 
 	/* fork the manager process */
 	mpid = fork();
-	if(mpid == -1) {
+	if (mpid == -1) {
 		return -1;
 	}
-	if(mpid == 0) {
+	if (mpid == 0) {
 		/* reset signals that defaulted from the main kraken process */
 		signal(SIGTERM, SIG_DFL);
 		signal(SIGINT, SIG_DFL);
 		signal(SIGHUP, SIG_DFL);
+		signal(SIGTSTP, SIG_DFL);
+		
 		signal(SIGCHLD, sigchldhandler);
+		prctl(PR_SET_PDEATHSIG, SIGHUP);
 
 		/* create the handler for SIGALRM so the handler will receive extra info */
 		sa.sa_flags = SA_SIGINFO;

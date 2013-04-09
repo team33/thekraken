@@ -110,7 +110,7 @@ Contents:
 
 
 
-4.3. Upgrading from The Kraken 0.4 or The Kraken 0.6-pre4
+4.3. Upgrading from The Kraken 0.4, The Kraken 0.6-pre4 or The Kraken 0.6
 
     1. Build The Kraken per section 5.
     2. Go to client directory (shutting the client down is not required)

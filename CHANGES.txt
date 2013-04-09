@@ -1,3 +1,19 @@
+2012-05-20 -- Prerelease (thekraken-0.7-pre8)
+-- incorporate novel approach to making FahCores engage
+   Dynamic Load Balancing (Stephen Gordon)
+-- autorestart DLB triggering method is no longer viable,
+   drop it
+-- 'np' override has been made obsolete by updates to V7
+   client, drop it
+-- prevent redundant SIGTERM from being delivered to FahCore
+   if it's already shutting down due to SIGINT/Ctrl+C
+-- play nicer with shell's job control
+-- include more robust parsing of command line and config
+   file variables
+-- include startcpu configuration variable for advanced users
+-- attempt to prevent root from running 'make install' initially
+
+
 2011-12-04 -- New release (thekraken-0.6)
 -- allow The Kraken to operate correctly on remote
    filesystems with inaccurate timekeeping

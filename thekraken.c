@@ -17,8 +17,6 @@
  *
  */
 
-#include <time.h>
-
 #include <signal.h>
 #include <stdio.h>
 #include <errno.h>
@@ -39,6 +37,8 @@
 #include <sys/fsuid.h>
 
 #include <ctype.h>
+
+#include <time.h>
 
 #include "version.h"
 #include "build.h"
@@ -69,7 +69,6 @@ static int debug_level;
 
 static pid_t cpid; /* FahCore PID */
 
-
 static int custom_config;
 
 static char wdbuf[PATH_MAX];
@@ -83,7 +82,7 @@ static void sighandler(int n)
 {
 	char buf[STR_BUF_SIZE];
 
-	snprintf(buf, sizeof(buf), "thekraken (sighandler): %d got signal 0x%08x\n", getpid(), n);
+	snprintf(buf, sizeof(buf), "thekraken: %d: (sighandler) got signal 0x%08x\n", getpid(), n);
 	write(logfd, buf, strlen(buf));
 	kill(cpid, n);
 }
@@ -564,7 +563,9 @@ int main(int ac, char **av)
 
 	int tpid_insyscall = 0;
 	
-	time_t synthload_start_time;
+	time_t synthload_start_time = 0;
+	
+	int shutdown = 0;
 
 	s = strrchr(av[0], '/');
 	if (!s) {
@@ -753,6 +754,7 @@ int main(int ac, char **av)
 	signal(SIGHUP, sighandler);
 	signal(SIGTERM, sighandler);
 	signal(SIGINT, sighandler);
+	signal(SIGTSTP, sighandler);
 
 	/* set the last_used_cpu to the config setting (default: 0) */
 	last_used_cpu = conf_startcpu;
@@ -809,7 +811,7 @@ int main(int ac, char **av)
 			return WEXITSTATUS(status);
 		}
 		if (WIFSIGNALED(status)) {
-			/* fatal signal sent by user to/raied by underlying FahCore */
+			/* fatal signal sent by user to/raised by underlying FahCore */
 			fprintf(logfp, "thekraken: %d: terminated by signal %d\n", rv, WTERMSIG(status));
 
 			if (rv == mpid) {
@@ -823,13 +825,14 @@ int main(int ac, char **av)
 				fprintf(logfp, "thekraken: %d: ignoring clone termination\n", rv);
 				continue;
 			}
-			
+			signal(WTERMSIG(status), SIG_DFL);
 			raise(WTERMSIG(status));
 			return -1;
 		}
 		if (WIFSTOPPED(status)) {
 			int e;
 			long prv;
+			int ptrace_request;
 
 			if (rv != tpid) /* ignore the talkative FahCore process or it will flood the log */
 				fprintf(logfp, "thekraken: %d: stopped with signal 0x%08x\n", rv, WSTOPSIG(status));
@@ -906,6 +909,7 @@ int main(int ac, char **av)
 										fprintf(logfp, "thekraken: synthload_start failed: %s (rv: %d)\n", strerror(errno), mpid);
 										tpid = -1;
 									}
+									fprintf(logfp, "thekraken: %d: synthload manager created (%d)\n", rv, mpid);
 								}
 								fahcore_logbufpos = 0;
 							}
@@ -922,7 +926,7 @@ int main(int ac, char **av)
 							getstr(rv, msgaddr, msglen, fahcore_errbuf, &fahcore_errbufpos, sizeof(fahcore_errbuf));
 							if (strchr(fahcore_errbuf, '\n') != NULL) {
 								if (strstr(fahcore_errbuf, "Turning on dynamic load balancing") != NULL) {
-									fprintf(logfp, "thekraken: %d: DLB has engaged; killing synthetic load manager (%d)\n", rv, mpid);
+									fprintf(logfp, "thekraken: %d: DLB has engaged; killing synthetic load manager\n", rv);
 									kill(mpid, SIGTERM);
 									tpid = -1; /* don't monitor the talkative thread anymore */
 								}
@@ -946,16 +950,36 @@ int main(int ac, char **av)
 				continue;
 			}
 
-			if (rv == tpid)
+			if (rv == tpid) {
 				tpid_insyscall = 0; /* any syscalls have been interrupted */
+				ptrace_request = PTRACE_SYSCALL;
+			} else {
+				ptrace_request = PTRACE_CONT;
+			}
 
-			if (WSTOPSIG(status) == SIGSTOP || WSTOPSIG(status) == SIGTERM) {
-				fprintf(logfp, "thekraken: %d: Continuing.\n", rv);
-				prv = ptrace(PTRACE_CONT, rv, 0, 0);
+			/*
+			 * allow delivery of only one terminating signal
+			 * to FahCore (per its sighandlers)
+			 */
+			if (WSTOPSIG(status) == SIGINT || WSTOPSIG(status) == SIGTERM) {
+				if (shutdown) {
+					fprintf(logfp, "thekraken: %d: Continuing%s.\n", rv, ptrace_request == PTRACE_SYSCALL ? " (SYSCALL)" : "");
+					prv = ptrace(ptrace_request, rv, 0, 0);
+					continue;
+				}
+				shutdown = 1;
+				fprintf(logfp, "thekraken: %d: Continuing (forwarding signal %d)%s.\n", rv, WSTOPSIG(status), ptrace_request == PTRACE_SYSCALL ? " (SYSCALL)" : "");
+				prv = ptrace(ptrace_request, rv, 0, WSTOPSIG(status));
 				continue;
 			}
-			fprintf(logfp, "thekraken: %d: Continuing (forwarding signal %d).\n", rv, WSTOPSIG(status));
-			prv = ptrace(PTRACE_CONT, rv, 0, WSTOPSIG(status));
+
+			if (WSTOPSIG(status) == SIGSTOP) {
+				fprintf(logfp, "thekraken: %d: Continuing%s.\n", rv, ptrace_request == PTRACE_SYSCALL ? " (SYSCALL)" : "");
+				prv = ptrace(ptrace_request, rv, 0, 0);
+				continue;
+			}
+			fprintf(logfp, "thekraken: %d: Continuing (forwarding signal %d)%s.\n", rv, WSTOPSIG(status), ptrace_request == PTRACE_SYSCALL ? " (SYSCALL)" : "");
+			prv = ptrace(ptrace_request, rv, 0, WSTOPSIG(status));
 			continue;
 		}
 		fprintf(logfp, "thekraken: %d: unknown waitpid status, halt!\n", rv);
