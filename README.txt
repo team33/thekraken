@@ -6,16 +6,16 @@ Contents:
 2. How is The Kraken useful?
 3. Supported configurations (PLEASE READ!)
 4. Upgrade recommendations
-4.1. Upgrade recommendations: The Kraken 0.2
-4.2. Upgrade recommendations: The Kraken 0.3
+4.1. Upgrade recommendations: from The Kraken 0.2
+4.2. Upgrade recommendations: from The Kraken 0.3
+4.3. Upgrading from The Kraken 0.4 or The Kraken 0.6-pre4
 5. Building The Kraken
 5.1. Pre-requisites
 5.2. Building
 6. Installation
 6.1. Installation: V6 client
 6.2. Installation: V7 client
-6.3. Installation: V7 client with thread number override (bigadv WUs
-     on 6-core processors)
+6.3. Autorestart feature
 7. Uninstallation
 8. How do I know it's working?
 9. Known issues and caveats
@@ -66,14 +66,13 @@ Contents:
 
 4. Upgrade recommendations
 
-4.1. Upgrade recommendations: The Kraken 0.2
+4.1. Upgrade recommendations: from The Kraken 0.2
 
-    It is recommended to uninstall and remove The Kraken for the sake
-    of housekeeping.
+    It is recommended to uninstall and remove (or archive) The Kraken from
+    the system for the sake of housekeeping.
 
-    1. Stop the client
-    2. Go to client directory
-    3. Run "./thekraken-0.2 -u"; it should give output similar to this one:
+    1. Go to client directory (shutting the client down is not required)
+    2. Run './thekraken-0.2 -u'; it should give output similar to the following:
 
     $ ./thekraken-0.2 -u
     thekraken: The Kraken 0.2
@@ -85,27 +84,57 @@ Contents:
     thekraken: finished uninstallation
     $ 
 
-    4. Run "rm -f thekraken-0.2*"
-    5. Follow instructions in 6.1, 6.2 or 6.3, depending on configuration.
+    3. Run 'rm -f thekraken-0.2*'
+    4. Follow instructions in 6.1 or 6.2, depending on configuration.
 
 
 
-4.2. Upgrade recommendations: The Kraken 0.3
+4.2. Upgrade recommendations: from The Kraken 0.3
 
-    It is recommended to uninstall and remove The Kraken from the system
-    for the sake of housekeeping.
+    It is recommended to uninstall and remove (or archive) The Kraken from
+    the system for the sake of housekeeping.
 
     If you downloaded and installed The Kraken 0.3 (which wasn't very
     fortunate release), there are two recommended action items --
     uninstalling wrapper component from client directory and removing
     The Kraken from /usr/local/bin.
 
-    1. Stop the client
-    2. Run (as root) "/usr/local/bin/thekraken -yu /var/lib/fahclient";
-       on Ubuntu prepend the line with "sudo".
-    3. Run (as root) "rm -f /usr/local/bin/thekraken"; on Ubuntu
-       prepend the line with "sudo".
-    4. Follow instructions in 6.1, 6.2 or 6.3, depending on configuration.
+    1. Run (as root) '/usr/local/bin/thekraken -yu /var/lib/fahclient';
+       on Ubuntu prepend the line with 'sudo'.
+    2. Run (as root) 'rm -f /usr/local/bin/thekraken'; on Ubuntu
+       prepend the line with 'sudo'.
+    3. Follow instructions in 6.1 or 6.2, depending on configuration.
+
+
+
+4.3. Upgrading from The Kraken 0.4 or The Kraken 0.6-pre4
+
+    1. Build The Kraken per section 5.
+    2. Go to client directory (shutting the client down is not required)
+    3. Run 'thekraken -u'; it should give output similar to the following:
+
+       $ thekraken -u
+       thekraken: The Kraken 0.6 (compiled Sun Nov  6 13:31:04 MST 2011 by fah@goldfinger)
+       thekraken: Processor affinity wrapper for Folding@Home
+       thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
+       thekraken: performing uninstallation from .
+       thekraken: /home/fah/fah-6.34/FahCore_a3.exe: wrapper succesfully uninstalled
+       thekraken: /home/fah/fah-6.34/FahCore_a5.exe: wrapper succesfully uninstalled
+       thekraken: removing configuration file
+       thekraken: finished uninstallation, 2 out of 2 file(s) processed
+       $ 
+
+    4. Run 'thekraken -i'; it should give output similar to the following:
+
+       $ thekraken -i
+       thekraken: The Kraken 0.6 (compiled Sun Nov  6 13:31:04 MST 2011 by fah@goldfinger)
+       thekraken: Processor affinity wrapper for Folding@Home
+       thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
+       thekraken: performing installation to .
+       thekraken: /home/fah/fah-6.34/FahCore_a3.exe: wrapper succesfully installed
+       thekraken: /home/fah/fah-6.34/FahCore_a5.exe: wrapper succesfully installed
+       thekraken: finished installation, 2 out of 2 files processed
+       $ 
 
 
 
@@ -129,8 +158,8 @@ Contents:
 
 5.2. Building
 
-    1. Run "make"
-    2. Run "sudo make install" (or run "make install" as root)
+    1. Run 'make'
+    2. Run 'make install' as root (on Ubuntu, run 'sudo make install')
     
     Voila. The Kraken is available in /usr/bin.
 
@@ -141,14 +170,13 @@ Contents:
 6.1. Installation: V6 client
 
     1. Stop the client
-    2. Go to client directory and run:
-
-       thekraken -i
+    2. Go to client directory
+    3. Run 'thekraken -i'
 
        Doing so should result in something along the following:
 
        $ thekraken -i
-       thekraken: The Kraken 0.4 (compiled Tue Apr 12 20:27:47 MDT 2011 by fah@tentacle)
+       thekraken: The Kraken 0.6 (compiled Sun Nov  6 13:31:04 MST 2011 by fah@goldfinger)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing installation to .
@@ -157,7 +185,7 @@ Contents:
        thekraken: finished installation, 2 out of 2 files processed
        $ 
 
-    3. Re-start the client.
+    4. Re-start the client.
 
 
 
@@ -170,28 +198,28 @@ Contents:
 
     1. Make sure the client is running (and folding)
     2. Determine client's "home" directory; run (as root; on Ubuntu prepend
-       with "sudo"):
+       with 'sudo'):
 
        stat /proc/$(ps auxw | awk '/FahCo[^[]/ { print $2 ; exit }' )/exe | head -1 | cut -f 3 -d \`  | sed s=cores.*\$=cores/=
 
-       It should return path, such as: "/var/lib/fahclient/cores/".
+       It should return path, such as: '/var/lib/fahclient/cores/'.
        Make note of this path.
 
     3. Stop the client
-    4. Run (as root; on Ubuntu prepend with "sudo"):
+    4. Run (as root; on Ubuntu prepend with 'sudo'):
 
        thekraken -i path-determined-in-step-2
 
        Doing so should result in something along the following:
 
-       $ sudo thekraken -i /var/lib/fahclient/cores/
+       $ thekraken -i /var/lib/fahclient/cores/
        thekraken: The Kraken 0.4 (compiled Tue Apr 12 20:27:47 MDT 2011 by fah@tentacle)
        thekraken: Processor affinity wrapper for Folding@Home
        thekraken: The Kraken comes with ABSOLUTELY NO WARRANTY; licensed under GPLv2
        thekraken: performing installation to /var/lib/fahclient/cores/
        thekraken: descend into /var/lib/fahclient/cores/www.stanford.edu and all other subdirectories [Y/n]?
 
-       If path appears correct, confirm with "y" and press Enter. This should result
+       If path appears correct, confirm with 'y' and press Enter. This should result
        in something along the following:
 
        thekraken: /var/lib/fahclient/cores/www.stanford.edu/~pande/Linux/AMD64/Core_a3.fah/FahCore_a3: wrapper succesfully installed
@@ -203,94 +231,121 @@ Contents:
 
 
 
-6.3. Installation: V7 client with thread number override (bigadv WUs
-     on 6-core processors)
+6.3. Autorestart feature
 
-    With the advent of V7 client, bigadv WU assignment criterium appears
-    to be number of processors requested ("cpus" parameter, by default
-    number of CPUs in the system).
+    Background: GROMACS employs Dynamic Load Balancing (DLB)
+    feature that aims at improving performance.
 
-    To put it in different words, the only thing that needs to be done
-    to receive bigadv WU is setting "cpus" parameter to 8 or higher.
+    GROMACS configuration used by FahCores enables DLB the moment
+    cumulative performance loss due to load imbalance exceeds 5%.
 
-    The downside of this approach is that now one gets to run 8 (or more)
-    threads on a 6-core processor, which is suboptimal.
+    When enabled, DLB reduces times of bigadv units by noticable
+    amount of time. Reports include reduction of 30s with P6903
+    and 45 seconds with P6904 (sometimes more).
 
-    The Kraken is capable of overriding number of threads when FahCore
-    is being started.
+    Depending on WU and system configuration (or even system state),
+    DLB gets enabled in a way that may appear random (sometimes it's
+    several minutes into WU; at other times it may be as late
+    as 90% into WU, sometimes it doesn't engage at all).
 
-    To take advantage of this feature, follow "Installation: V7 client"
-    but use the following command line in step 4:
+    It has been determined that restarting WU from a checkpoint
+    significantly increases probability of almost-instantaneous
+    DLB engagement (with P6903 and P6904 units).
 
-    thekraken -c np=6 -i path-determined-in-step-2
+    Autorestart feature, when enabled, makes The Kraken restart
+    FahCore upon completed write of first checkpoint (15 minutes
+    in typical configuration).
 
-    That's it.
+    To enable autorestart feature add '-c autorestart=1' parameter
+    to the command line, when installing, e.g. 'thekraken -i -c autorestart=1'.
+    If already installed, uninstall, then install with '-c autorestart=1'.
+    Stopping the client is not required.
+
+    NOTE: when enabled, FahCore will appear to have "started twice"
+          or restarted without user interaction; this is expected
+          and normal
+
+    NOTE: autorestart feature isn't guaranteed; DLB may not always engage
+
+    NOTE: DLB enagagement on units other than P6903 and P6904
+          is rare
 
 
 
 7. Uninstallation
 
-    Follow installation instructions but replace "thekraken -i" with "thekraken -u".
+    Follow installation instructions but replace 'thekraken -i' with 'thekraken -u'.
 
 
 
 8. How do I know it's working?
 
-    While folding, run:
+    Method #1:
+
+        While folding, run 'top'. Look for process consuming most CPU. 'COMMAND'
+        of that process should read 'thekraken-FahCo', e.g.:
+
+           PID  USER     PR  NI  VIRT  RES  SHR S   %CPU %MEM    TIME+   P COMMAND
+          8411  fah      39  19 6452m 4.5g 3188 S 4801.6 14.3  52424:56 24 thekraken-FahCo
+
+
+    Method #2 (examination of FahCores' affinities):
+
+        While folding, run:
    
-      for i in $(ps -L auxw | awk '/FahCo[^[]/ { if ($4 > 10) print $3 }' | sort -n -k1,1) ; do taskset -pc $i  ; done
+          for i in $(ps -L auxw | awk '/FahCo[^[]/ { if ($4 > 10) print $3 }' | sort -n -k1,1) ; do taskset -pc $i  ; done
 
-    Doing so should give you sequential processor numbers starting with 0 in its
-    output, e.g.:
+        Doing so should give you sequential processor numbers starting with 0 in its
+        output, e.g.:
 
-    pid 41666's current affinity list: 0
-    pid 41669's current affinity list: 1
-    pid 41670's current affinity list: 2
-    pid 41671's current affinity list: 3
-    pid 41672's current affinity list: 4
-    pid 41673's current affinity list: 5
-    pid 41674's current affinity list: 6
-    pid 41675's current affinity list: 7
-    pid 41676's current affinity list: 8
-    pid 41677's current affinity list: 9
-    pid 41678's current affinity list: 10
-    pid 41679's current affinity list: 11
-    pid 41680's current affinity list: 12
-    pid 41681's current affinity list: 13
-    pid 41682's current affinity list: 14
-    pid 41683's current affinity list: 15
-    pid 41684's current affinity list: 16
-    pid 41685's current affinity list: 17
-    pid 41686's current affinity list: 18
-    pid 41687's current affinity list: 19
-    pid 41688's current affinity list: 20
-    pid 41689's current affinity list: 21
-    pid 41690's current affinity list: 22
-    pid 41691's current affinity list: 23
-    pid 41692's current affinity list: 24
-    pid 41693's current affinity list: 25
-    pid 41694's current affinity list: 26
-    pid 41695's current affinity list: 27
-    pid 41696's current affinity list: 28
-    pid 41697's current affinity list: 29
-    pid 41698's current affinity list: 30
-    pid 41699's current affinity list: 31
-    pid 41700's current affinity list: 32
-    pid 41701's current affinity list: 33
-    pid 41702's current affinity list: 34
-    pid 41703's current affinity list: 35
-    pid 41704's current affinity list: 36
-    pid 41705's current affinity list: 37
-    pid 41706's current affinity list: 38
-    pid 41707's current affinity list: 39
-    pid 41708's current affinity list: 40
-    pid 41709's current affinity list: 41
-    pid 41710's current affinity list: 42
-    pid 41711's current affinity list: 43
-    pid 41712's current affinity list: 44
-    pid 41713's current affinity list: 45
-    pid 41714's current affinity list: 46
-    pid 41715's current affinity list: 47
+        pid 41666's current affinity list: 0
+        pid 41669's current affinity list: 1
+        pid 41670's current affinity list: 2
+        pid 41671's current affinity list: 3
+        pid 41672's current affinity list: 4
+        pid 41673's current affinity list: 5
+        pid 41674's current affinity list: 6
+        pid 41675's current affinity list: 7
+        pid 41676's current affinity list: 8
+        pid 41677's current affinity list: 9
+        pid 41678's current affinity list: 10
+        pid 41679's current affinity list: 11
+        pid 41680's current affinity list: 12
+        pid 41681's current affinity list: 13
+        pid 41682's current affinity list: 14
+        pid 41683's current affinity list: 15
+        pid 41684's current affinity list: 16
+        pid 41685's current affinity list: 17
+        pid 41686's current affinity list: 18
+        pid 41687's current affinity list: 19
+        pid 41688's current affinity list: 20
+        pid 41689's current affinity list: 21
+        pid 41690's current affinity list: 22
+        pid 41691's current affinity list: 23
+        pid 41692's current affinity list: 24
+        pid 41693's current affinity list: 25
+        pid 41694's current affinity list: 26
+        pid 41695's current affinity list: 27
+        pid 41696's current affinity list: 28
+        pid 41697's current affinity list: 29
+        pid 41698's current affinity list: 30
+        pid 41699's current affinity list: 31
+        pid 41700's current affinity list: 32
+        pid 41701's current affinity list: 33
+        pid 41702's current affinity list: 34
+        pid 41703's current affinity list: 35
+        pid 41704's current affinity list: 36
+        pid 41705's current affinity list: 37
+        pid 41706's current affinity list: 38
+        pid 41707's current affinity list: 39
+        pid 41708's current affinity list: 40
+        pid 41709's current affinity list: 41
+        pid 41710's current affinity list: 42
+        pid 41711's current affinity list: 43
+        pid 41712's current affinity list: 44
+        pid 41713's current affinity list: 45
+        pid 41714's current affinity list: 46
+        pid 41715's current affinity list: 47
 
    
    
@@ -327,4 +382,13 @@ Contents:
 
     Special thanks go to:
 
-        brutis at AMDZone -- for excellent V7 test feedback
+        brutis at AMDZone -- excellent V7 test feedback
+
+        sfield -- original DLB enagement observation
+
+        musky at [H]ardForum -- alternative method for installation
+                                confirmation
+
+	firedfly at [H]ardForum -- help with troubleshooting
+                                   client-on-remote-filesystem-with-off-clock
+                                   issue

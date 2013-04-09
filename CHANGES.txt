@@ -1,3 +1,20 @@
+2011-12-04 -- New release (thekraken-0.6)
+-- allow The Kraken to operate correctly on remote
+   filesystems with inaccurate timekeeping
+-- use stat() rather than lstat()
+-- minor makefile update
+-- documentation update
+
+
+2011-07-30 -- Prerelease (thekraken-0.6-pre4)
+-- The Kraken now sports autorestart feature (aims
+   at engaging Dynamic Load Balancing)
+-- avoid excessive prompts when operating recursively
+-- don't use non-reentrant functions in signal handler
+-- Makefile revamp
+-- couple cosmetic documentation updates
+
+
 2010-04-12 -- New release (thekraken-0.4)
 -- huge documentation update
 -- set default install directory to /usr/bin rather than

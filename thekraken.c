@@ -766,7 +766,7 @@ int main(int ac, char **av)
 			fprintf(logfp, "thekraken: autorestart: WARNING: couldn't determine filesystem time offset, disabling autorestart\n");
 			conf_autorestart = 0;
 		} else {
-			fprintf(logfp, "thekraken: autorestart: fs time offset is %ld seconds\n", fs_time_offset);
+			fprintf(logfp, "thekraken: autorestart: filesystem time offset: %ld seconds\n", fs_time_offset);
 			autorestart_start_time = time(NULL) + fs_time_offset;
 			alarm(AUTORESTART_POLLING_INTERVAL);
 		}
