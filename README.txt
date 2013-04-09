@@ -9,14 +9,14 @@ Contents:
 4.1. Upgrade recommendations: from The Kraken 0.2
 4.2. Upgrade recommendations: from The Kraken 0.3
 4.3. Upgrading from The Kraken 0.4, The Kraken 0.6-pre4 or The Kraken 0.6
-5. Building The Kraken
+5. Building and installing The Kraken
 5.1. Pre-requisites
-5.2. Building
-6. Installation
-6.1. Installation: V6 client
-6.2. Installation: V7 client
+5.2. Building and installation
+6. Wrapping
+6.1. Wrapping: V6 client
+6.2. Wrapping: V7 client
 6.3. Dynamic Load Balancing
-7. Uninstallation
+7. Unwrapping
 8. How do I know it's working?
 9. Known issues and caveats
 10. Support
@@ -71,8 +71,8 @@ Contents:
 
 4.1. Upgrade recommendations: from The Kraken 0.2
 
-    It is recommended to uninstall and remove (or archive) The Kraken from
-    the system for the sake of housekeeping.
+    It is recommended to unwrap FahCores and remove (or archive) The Kraken
+    from the system for the sake of housekeeping.
 
     1. Go to client directory (shutting the client down is not required)
     2. Run './thekraken-0.2 -u'; it should give output similar to the following:
@@ -94,13 +94,13 @@ Contents:
 
 4.2. Upgrade recommendations: from The Kraken 0.3
 
-    It is recommended to uninstall and remove (or archive) The Kraken from
-    the system for the sake of housekeeping.
+    It is recommended to unwrap FahCores and remove (or archive) The Kraken
+    from the system for the sake of housekeeping.
 
     If you downloaded and installed The Kraken 0.3 (which wasn't very
     fortunate release), there are two recommended action items --
-    uninstalling wrapper component from client directory and removing
-    The Kraken from /usr/local/bin.
+    unwrapping FahCores in client directory and removing The Kraken
+    from /usr/local/bin.
 
     1. Run (as root) '/usr/local/bin/thekraken -yu /var/lib/fahclient';
        on Ubuntu prepend the line with 'sudo'.
@@ -112,7 +112,7 @@ Contents:
 
 4.3. Upgrading from The Kraken 0.4, The Kraken 0.6-pre4 or The Kraken 0.6
 
-    1. Build The Kraken per section 5.
+    1. Build and install The Kraken per section 5.
     2. Go to client directory (shutting the client down is not required)
     3. Run 'thekraken -u'; it should give output similar to the following:
 
@@ -129,7 +129,7 @@ Contents:
        $ 
 
 
-    4. Run 'thekraken -i'; it should give output similar to the following:
+    4. Run 'thekraken -w'; it should give output similar to the following:
 
        $ thekraken -i
        thekraken: The Kraken 0.7-pre11 (compiled Sun May 20 19:36:47 MDT 2012 by fah@tentacle)
@@ -143,7 +143,7 @@ Contents:
 
 
 
-5. Building The Kraken
+5. Building and installing The Kraken
 
 5.1. Pre-requisites
 
@@ -161,7 +161,7 @@ Contents:
 
 
 
-5.2. Building
+5.2. Building and installation
 
     1. Run 'make'
     2. Run 'make install' as root (on Ubuntu, run 'sudo make install')
@@ -170,13 +170,13 @@ Contents:
 
 
 
-6. Installation
+6. Wrapping
 
-6.1. Installation: V6 client
+6.1. Wrapping: V6 client
 
     1. Stop the client
     2. Go to client directory
-    3. Run 'thekraken -i'
+    3. Run 'thekraken -w'
 
        Doing so should result in something along the following:
 
@@ -194,12 +194,12 @@ Contents:
 
 
 
-6.2. Installation: V7 client
+6.2. Wrapping: V7 client
 
     As single V7 client installation may be run off more than one "home"
-    directory, the installation process is little more complicated.
+    directory, wrapping process is little more complicated.
     It is imperative client's home directory is determined prior to
-    installation of The Kraken.
+    wrapping.
 
     1. Make sure the client is running (and folding)
     2. Determine client's "home" directory; run (as root; on Ubuntu prepend
@@ -213,7 +213,7 @@ Contents:
     3. Stop the client
     4. Run (as root; on Ubuntu prepend with 'sudo'):
 
-       thekraken -i path-determined-in-step-2
+       thekraken -w path-determined-in-step-2
 
        Doing so should result in something along the following:
 
@@ -259,16 +259,16 @@ Contents:
     deadline is reached (5 minutes by default).
 
     DLB triggering is enabled by default. To disable it, add '-c dlbload=0'
-    parameter to the command line, when installing, e.g.
-    'thekraken -i -c dlbload=0'.
-    If already installed, uninstall, then install with '-c dlbload=0'.
+    parameter to the command line, when wrapping, e.g.
+    'thekraken -w -c dlbload=0'.
+    If already wrapped: unwrap, then re-wrap with '-c dlbload=0'.
     Stopping the client is not required.
 
 
 
-7. Uninstallation
+7. Unwrapping
 
-    Follow installation instructions but replace 'thekraken -i' with 'thekraken -u'.
+    Follow wrapping instructions but replace 'thekraken -w' with 'thekraken -u'.
 
 
 

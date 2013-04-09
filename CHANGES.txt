@@ -1,3 +1,11 @@
+2012-06-02 -- Prerelease (thekraken-0.7-pre12)
+-- add startup deadline so broken units fail early
+-- include improved logging infrastructure
+-- FahCore installation process is now called 'wrapping'
+   with dedicated command line option: -w; -i is preserved
+   for backward compatibility
+
+
 2012-05-20 -- Prerelease (thekraken-0.7-pre11)
 -- resolves build issues in certain configurations
 

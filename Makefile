@@ -9,7 +9,7 @@ PROJ_LIBS=$(LIBS) -lrt -lm
 OBJROOT=obj
 OBJDIR=$(OBJROOT)
 
-SOURCES=thekraken.c synthload.c
+SOURCES=thekraken.c synthload.c llog.c
 
 OBJECTS=$(SOURCES:%.c=$(OBJDIR)/%.o)
 DEPS=$(SOURCES:%.c=$(OBJDIR)/.%.d)

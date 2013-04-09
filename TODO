@@ -1,3 +1,5 @@
 - CPU allocation policy (direction)
-- node binding
-- when no -c is present, .cfg should be removed/truncated
+- node binding (maybe)
+- when no -c is present, .cfg should be removed/truncated (likely)
+- -w / -u
+- timestamps
