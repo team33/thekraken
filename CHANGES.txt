@@ -1,3 +1,8 @@
+2013-09-22 -- Prerelease (thekraken-0.7-pre16)
+-- don't enable DLB load when client is running in uniprocessor
+   configuration
+
+
 2012-06-15 -- Prerelease (thekraken-0.7-pre15)
 -- convert startup deadline to only warn the user
    of bad WU instead of killing FahCore
