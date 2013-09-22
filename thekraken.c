@@ -984,11 +984,11 @@ int main(int ac, char **av)
 							getstr(rv, msgaddr, msglen, fahcore_logbuf, &fahcore_logbufpos, sizeof(fahcore_logbuf));
 							if (strchr(fahcore_logbuf, '\n') != NULL) {
 								if (first_step == 0 && strstr(fahcore_logbuf, "Completed ") != NULL && strstr(fahcore_logbuf, "out of") != NULL) {
+									int dlbload_workers = (nclones - 2) / 2;
+
 									llog("thekraken: %d: first step identified\n", rv);
 									first_step = 1;
-									if (conf_dlbload) {
-										int dlbload_workers = (nclones - 2) / 2;
-
+									if (conf_dlbload && dlbload_workers > 0) {
 										llog("thekraken: %d: creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
 										synthload_start_time = time(NULL);
 										mpid = synthload_start(conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline, dlbload_workers, conf_startcpu);
