@@ -1,3 +1,8 @@
+2013-11-25 -- Prerelease (thekraken-0.7-pre17)
+-- set timestamp of wudata_XX.dyn to current time to allow
+   more accurate calculation of session TPF/PPD (by modded qd utility)
+
+
 2013-09-22 -- Prerelease (thekraken-0.7-pre16)
 -- don't enable DLB load when client is running in uniprocessor
    configuration
