@@ -632,6 +632,8 @@ int main(int ac, char **av)
 
 	int first_step = 0;
 
+	char fah_slot[4] = { '\0', };
+
 	logfp = stderr;
 
 	s = strrchr(av[0], '/');
@@ -988,6 +990,14 @@ int main(int ac, char **av)
 
 									llog("thekraken: %d: first step identified\n", rv);
 									first_step = 1;
+
+									{
+										char fn[24];
+
+										snprintf(fn, sizeof(fn), "work/wudata_%s.dyn", fah_slot);
+										utimes(fn, NULL);
+									}
+
 									if (conf_dlbload && dlbload_workers > 0) {
 										llog("thekraken: %d: creating %d synthload workers: on %dms, off %dms, deadline %dms\n", rv, dlbload_workers, conf_dlbload_onperiod, conf_dlbload_offperiod, conf_dlbload_deadline);
 										synthload_start_time = time(NULL);
@@ -1056,13 +1066,19 @@ int main(int ac, char **av)
 						} else {
 							char buf[16];
 							int bufpos = 0;
+							char *tmp;
 
 							cpid_insyscall = 0;
 
 							getstr(rv, fn, -1, buf, &bufpos, sizeof(buf));
-							if (strstr(buf, "/logfile_")) {
+							if ((tmp = strstr(buf, "/logfile_"))) {
 								llog("thekraken: %d: logfile fd: %ld (pathname: %s)\n", rv, ret, buf);
 								fahcore_logfd = ret;
+								if (tmp[9] != '\0' && tmp[10] != '\0') {
+									fah_slot[0] = tmp[9];
+									fah_slot[1] = tmp[10];
+									fah_slot[2] = '\0';
+								}
 							}
 						}
 					}
