@@ -1,3 +1,8 @@
+2013-12-15 -- Prerelease (thekraken-0.7-pre18)
+-- features automatic remapping of np FahCore parameter;
+   currently, remapping 40->44 is enabled for all FahCores
+
+
 2013-11-25 -- Prerelease (thekraken-0.7-pre17)
 -- set timestamp of wudata_XX.dyn to current time to allow
    more accurate calculation of session TPF/PPD (by modded qd utility)
