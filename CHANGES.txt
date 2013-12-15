@@ -1,3 +1,8 @@
+2013-12-15 -- Prerelease (thekraken-0.7-pre19)
+-- ensures that remapping of np FahCore parameter can be
+   disabled (-c remap_np=0)
+
+
 2013-12-15 -- Prerelease (thekraken-0.7-pre18)
 -- features automatic remapping of np FahCore parameter;
    currently, remapping 40->44 is enabled for all FahCores
