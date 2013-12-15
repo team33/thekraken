@@ -271,7 +271,8 @@ static int list_unwrap(int options, int *counter, int *total)
 #define CONF_DLBLOAD_DEADLINE 4
 #define CONF_STARTUP_DEADLINE 5
 #define CONF_V 6
-#define CONF_MAX 7
+#define CONF_REMAP_NP 7
+#define CONF_MAX 8
 
 #define DEFAULT_STARTCPU 0
 #define DEFAULT_DLBLOAD 1
@@ -280,13 +281,14 @@ static int list_unwrap(int options, int *counter, int *total)
 #define DEFAULT_DLBLOAD_DEADLINE 300000 /* 5 minutes */
 #define DEFAULT_STARTUP_DEADLINE 300 /* 5 minutes */
 #define DEFAULT_V 0
+#define DEFAULT_REMAP_NP 1
 
 static char **conf_line;
 static int conf_index;
 static int conf_total;
 static int conf_step = 4;
 
-static char *conf_key[] = { "startcpu", "dlbload", "dlbload_onperiod", "dlbload_offperiod", "dlbload_deadline", "startup_deadline", "v", NULL };
+static char *conf_key[] = { "startcpu", "dlbload", "dlbload_onperiod", "dlbload_offperiod", "dlbload_deadline", "startup_deadline", "v", "remap_np", NULL };
 static char *conf_val[sizeof(conf_key)/sizeof(char *)];
 
 static unsigned int conf_startcpu = DEFAULT_STARTCPU;
@@ -296,6 +298,7 @@ static unsigned int conf_dlbload_offperiod = DEFAULT_DLBLOAD_OFFPERIOD;
 static unsigned int conf_dlbload_deadline = DEFAULT_DLBLOAD_DEADLINE;
 static unsigned int conf_startup_deadline = DEFAULT_STARTUP_DEADLINE;
 static unsigned int conf_v = DEFAULT_V;
+static unsigned int conf_remap_np = DEFAULT_REMAP_NP;
 
 static void conf_line_add(char *s)
 {
@@ -399,6 +402,19 @@ static int conf_validate_one(int n)
 			conf_v = DEFAULT_V;
 		} else {
 			llog("thekraken: config: %s=%d\n", conf_key[CONF_V], conf_v);
+		}
+		return ret;
+	}
+	if (n == CONF_REMAP_NP && conf_val[CONF_REMAP_NP]) {
+		char *end;
+		
+		conf_remap_np = strtol(conf_val[CONF_REMAP_NP], &end, 10);
+		if (*end != '\0' || conf_remap_np > 1) {
+			llog("thekraken: configuration variable '%s': invalid value: '%s'\n", conf_key[CONF_REMAP_NP], conf_val[CONF_REMAP_NP]);
+			ret = 1;
+			conf_remap_np = DEFAULT_REMAP_NP;
+		} else {
+			llog("thekraken: config: %s=%d\n", conf_key[CONF_REMAP_NP], conf_remap_np);
 		}
 		return ret;
 	}
@@ -843,7 +859,21 @@ int main(int ac, char **av)
 	}
 	if (cpid == 0) {
 		long prv;
+		char **avclone;
+		int i;
 		
+		avclone = malloc((ac + 1) * sizeof(*avclone));
+		for (i = 0; i < ac; i++) {
+			avclone[i] = av[i];
+			if (!strcmp(av[i], "-np") && av[i + 1]) {
+				if (!strcmp(av[i + 1], "40")) {
+					avclone[i + 1] = "44";
+					i++;
+				}
+			}
+		}
+		avclone[ac] = NULL;
+
 		prv = ptrace(PTRACE_TRACEME, 0, 0, 0);
 		if (prv == -1) {
 			llog("thekraken: child: ptrace(PTRACE_TRACEME) returns -1 (errno %d)\n", errno);
@@ -851,7 +881,7 @@ int main(int ac, char **av)
 		}
 		llog("thekraken: child: ptrace(PTRACE_TRACEME) returns 0\n");
 		llog("thekraken: child: Executing...\n");
-		execvp(nbin, av);
+		execvp(nbin, avclone);
 		llog("thekraken: child: exec: %s\n", strerror(errno));
 		return -1;
 	}
