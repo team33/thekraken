@@ -865,7 +865,7 @@ int main(int ac, char **av)
 		avclone = malloc((ac + 1) * sizeof(*avclone));
 		for (i = 0; i < ac; i++) {
 			avclone[i] = av[i];
-			if (!strcmp(av[i], "-np") && av[i + 1]) {
+			if (conf_remap_np && !strcmp(av[i], "-np") && av[i + 1]) {
 				if (!strcmp(av[i + 1], "40")) {
 					avclone[i + 1] = "44";
 					i++;
